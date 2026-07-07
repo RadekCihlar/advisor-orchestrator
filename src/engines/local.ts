@@ -1,13 +1,12 @@
 // Free, local reviewer/builder engine via Ollama's HTTP API.
 //
-// ponytail: shape verified against Ollama's public /api/chat convention, NOT
-// tested against a running instance (Ollama isn't installed on the machine
-// this was built on). Confirm against `ollama --version` + a real call
-// before trusting it in a benchmark run.
+// Verified live against a real running instance (qwen2.5:0.5b) — non-
+// streaming /api/chat returns prompt_eval_count/eval_count, real token
+// counts, contrary to the original assumption that Ollama reports none.
 
 export interface CallResult {
   text: string;
-  usage: null; // Ollama doesn't report token counts by default
+  usage: { inputTokens: number; outputTokens: number } | null;
   notionalCostUsd: null; // always free
 }
 
@@ -29,5 +28,12 @@ export async function callLocal(
     throw new Error(`Ollama ${res.status}: ${await res.text()}`);
   }
   const data = await res.json();
-  return { text: data.message?.content ?? '', usage: null, notionalCostUsd: null };
+  return {
+    text: data.message?.content ?? '',
+    usage:
+      typeof data.prompt_eval_count === 'number' && typeof data.eval_count === 'number'
+        ? { inputTokens: data.prompt_eval_count, outputTokens: data.eval_count }
+        : null,
+    notionalCostUsd: null,
+  };
 }
