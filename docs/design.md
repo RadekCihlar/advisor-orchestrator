@@ -18,9 +18,13 @@ Reader: whoever builds this next (you, or a fresh Claude Code session with this 
 
 ## 1. Purpose
 
-A standalone Node CLI/library that runs a **builder model** against a task, with a **reviewer model** periodically checked in on its work — configurable direction (either model can be builder or reviewer, including peers of equal capability), configurable frequency (every turn / every N turns / only-when-builder-is-unsure / before-declaring-done), and configurable token budget (including a "saver" mode aimed at *net lower* cost than running the builder alone, not just lower than running the reviewer on everything).
+A standalone Node CLI/library that runs a **builder model** against a task through a **revision loop**: builder produces → reviewer critiques → builder revises → repeat. Configurable direction (either model can be builder or reviewer, including peers of equal capability), configurable frequency (review every revision / only-when-builder-is-unsure / only-before-declaring-done), and configurable token budget (including a "saver" mode aimed at *net lower* cost than running the builder alone, not just lower than running the reviewer on everything).
 
 Every consult is **our own small, independent `/v1/messages` call** — no dependency on Anthropic's Advisor tool. One engine, one code path, any pairing.
+
+**A "turn" = one revision cycle, not an agent step.** The builder client is a plain, toolless `messages.create()` call (§6) — it cannot take multiple autonomous actions on its own between consults the way the native Advisor tool's executor can. So frequency is measured in *revisions* (builder output → reviewer feedback → builder's next attempt), not in agent turns. This constrains §5 below: modes that presuppose a multi-step agent loop don't apply here.
+
+**Where this sits next to what already exists:** Claude Code's own built-in `advisor()` tool already gives *me* (running inside a Claude Code session) asymmetric-priced executor+advisor consults for free, no setup. This project fills a different niche: standalone and scriptable outside any Claude Code session, with arbitrary model pairings/directions rather than one fixed asymmetric pair. If the workload already runs inside Claude Code, reach for `advisor()` first — build this only for the standalone/scriptable case.
 
 ---
 
@@ -83,9 +87,9 @@ direction: builder-to-reviewer  # builder-to-reviewer | reviewer-to-builder | pe
                                  # this field only decides which model plays which role
 
 frequency:
-  mode: on-checkpoint         # every-turn | every-n-turns | on-checkpoint |
-                               # on-low-confidence | before-finish
-  every_n: 3                  # used when mode: every-n-turns
+  mode: every-revision        # every-revision | on-low-confidence | before-finish
+                               # (no every-n-turns / on-checkpoint — there's no multi-step
+                               #  agent loop to count turns in; see §1's "what's a turn")
   max_consults_per_run: 5     # hard loop cap, always enforced client-side
 
 token_budget: low             # high | medium | low | saver
@@ -96,11 +100,11 @@ token_budget: low             # high | medium | low | saver
   #         reviewer only engages on explicit escalation (§10) — see §11 for why/when
   #         this can beat "no reviewer at all" on total cost, and when it can't.
 
-consult_context: latest-turn  # latest-turn | full-history
-  # latest-turn (default): reviewer sees only the task + builder's most recent output —
+consult_context: latest-revision  # latest-revision | full-history
+  # latest-revision (default): reviewer sees only the task + builder's most recent output —
   #   keeps every consult small and its cost roughly constant regardless of run length
-  # full-history: reviewer sees the whole conversation so far — costs more per consult
-  #   as the run grows, but useful when a mistake early on needs full context to catch
+  # full-history: reviewer sees every prior revision — costs more per consult as the
+  #   run grows, but useful when a mistake several revisions back needs full context to catch
 
 escalation:
   enabled: true
@@ -170,7 +174,7 @@ Known weakness vs. the native tool's in-band trigger: our builder only gets to "
 
 Mechanism (hypothesis, not proven — flag honestly): drop the **builder's** own effort/thinking one notch below what you'd normally run it at *solo* (e.g. `medium` → `low`), betting that the cheap reviewer safety-net catches the resulting quality gap often enough that you don't pay for a human-driven redo cycle. Net cost = (cheaper builder runs) + (occasional small reviewer consults) vs. baseline = (normal-effort builder run, some fraction of which silently ships mistakes that cost more to fix later, off-system).
 
-This only wins if: mistakes-caught-by-reviewer × cost-of-a-redo > reviewer-consult-cost + effort-tokens-saved-by-builder. That's workload-dependent — **validate on your own tasks before trusting it**. Don't ship `saver` as the default. `consult_context: latest-turn` (§5) is what keeps each safety-net check cheap enough for the math to have a chance of working at all.
+This only wins if: mistakes-caught-by-reviewer × cost-of-a-redo > reviewer-consult-cost + effort-tokens-saved-by-builder. That's workload-dependent — **validate on your own tasks before trusting it**. Don't ship `saver` as the default. `consult_context: latest-revision` (§5) is what keeps each safety-net check cheap enough for the math to have a chance of working at all.
 
 ---
 
@@ -178,9 +182,9 @@ This only wins if: mistakes-caught-by-reviewer × cost-of-a-redo > reviewer-cons
 
 - `max_consults_per_run` — hard loop cap, always client-side
 - `reviewer.max_tokens` — hard cap on reviewer output per consult
-- `consult_context: latest-turn` — the single biggest structural cost win of going fully custom: every consult call stays small regardless of run length, instead of resending the whole transcript like the native tool would
+- `consult_context: latest-revision` — the single biggest structural cost win of going fully custom: every consult call stays small regardless of run length, instead of resending the whole transcript like the native tool would
 - `caching: true` — ordinary prompt-caching on the reviewer's static instructions across consults in one run
-- Frequency mode — the single biggest *policy* cost lever; `on-low-confidence` is cheapest, `every-turn` is most expensive
+- Frequency mode — the single biggest *policy* cost lever; `on-low-confidence` is cheapest, `every-revision` is most expensive
 
 ---
 
@@ -196,7 +200,7 @@ This only wins if: mistakes-caught-by-reviewer × cost-of-a-redo > reviewer-cons
 ## 13. Risks
 
 - Escalation (§9) is weaker than the native tool's in-band trigger — builder can only "ask" at the end of a turn, not truly mid-generation. Acceptable for v1, worth flagging so nobody expects native-tool-grade responsiveness.
-- `consult_context: latest-turn` trades completeness for cost — a mistake made several turns ago, invisible in "just the latest output," won't get caught until/unless `full-history` is used. Document this trade-off in the CLI help text, not just here.
+- `consult_context: latest-revision` trades completeness for cost — a mistake made several turns ago, invisible in "just the latest output," won't get caught until/unless `full-history` is used. Document this trade-off in the CLI help text, not just here.
 - "Saver mode nets lower cost" (§10) is unvalidated — first real build should include a benchmark harness comparing saver-on vs saver-off vs no-reviewer-baseline on a fixed task set, before anyone relies on the claim.
 
 ---
@@ -207,7 +211,7 @@ This only wins if: mistakes-caught-by-reviewer × cost-of-a-redo > reviewer-cons
 2. `client/` — reuse the raw-fetch pattern from the earlier one-off `advisor.ts` script (deleted from the Slejvak.cz repo this session, but the shape is proven: works, hits real API, 401s correctly on bad key)
 3. `runner/` — single consult-cycle loop (§7), builder-to-reviewer direction first as the smallest working slice
 4. `usage/` tally + baseline comparison print-out
-5. `policy/` frequency modes, starting with `on-checkpoint` + `every-n-turns` (skip `on-low-confidence` until §9's marker mechanism is proven)
+5. `policy/` frequency modes, starting with `every-revision` + `before-finish` (skip `on-low-confidence` until §9's marker mechanism is proven)
 6. Escalation marker mechanism (§9)
 7. `reviewer-to-builder` / `peer` directions — same runner, just swap config, should need near-zero new code if §7 was built direction-agnostic from the start
 8. Benchmark harness for §10's saver-mode claim

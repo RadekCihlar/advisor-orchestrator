@@ -30,8 +30,7 @@ reviewer:
 direction: builder-to-reviewer   # or: reviewer-to-builder, peer
 
 frequency:
-  mode: on-checkpoint            # every-turn | every-n-turns | on-checkpoint |
-                                  # on-low-confidence | before-finish
+  mode: every-revision           # every-revision | on-low-confidence | before-finish
   max_consults_per_run: 5
 
 token_budget: low                # high | medium | low | saver
@@ -40,13 +39,14 @@ token_budget: low                # high | medium | low | saver
 - **Bidirectional.** `builder-to-reviewer`, `reviewer-to-builder`, `peer` —
   same mechanism (two plain calls) regardless of direction. Any two model IDs,
   either role.
-- **Small calls, on purpose.** `consult_context: latest-turn` (default) sends
+- **Small calls, on purpose.** `consult_context: latest-revision` (default) sends
   the reviewer just the task + the builder's latest output — cost per consult
   stays flat regardless of how long the run has been going, instead of
   resending the whole transcript every time.
-- **Configurable frequency.** Check in every turn, every N turns, only at
-  checkpoints, only when the builder flags its own uncertainty, or only
-  before declaring the task done.
+- **Configurable frequency.** Review every revision, only when the builder
+  flags its own uncertainty, or only before declaring the task done. (No
+  "every N turns" — there's no multi-step agent loop to count turns in; the
+  builder is a toolless call, not an agent. See design doc §1.)
 - **Configurable cost.** `high` / `medium` / `low` token budgets, plus a
   `saver` mode that bets a cheaper builder + occasional cheap review nets a
   *lower* total cost than running the builder alone at full effort — flagged
