@@ -5,10 +5,10 @@ work, another checks in on it — how often, how much it costs, and which model
 plays which role are all yours to set.
 
 Inspired by Anthropic's [Advisor tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool),
-but generalized past its one hard limit: the official tool only lets a
-*weaker* model consult a *stronger* one. This project adds the reverse and
-peer-review directions on top, via a second execution engine, behind the same
-config file.
+but **not built on it**. No beta API dependency, no server-enforced
+"reviewer must be smarter than builder" rule. Every consult is just our own
+small, independent call to the Messages API — one engine, works for any
+pairing in either direction.
 
 > **Status: design stage.** No code yet — see [`docs/design.md`](docs/design.md)
 > for the full plan (architecture, config schema, sequence diagrams, build
@@ -37,10 +37,13 @@ frequency:
 token_budget: low                # high | medium | low | saver
 ```
 
-- **Bidirectional.** `builder-to-reviewer` (cheap model builds, strong model
-  reviews) runs on Anthropic's native Advisor tool directly. `reviewer-to-builder`
-  and `peer` (any other pairing or direction) run on a hand-rolled two-call
-  orchestrator, since the native tool structurally can't do those directions.
+- **Bidirectional.** `builder-to-reviewer`, `reviewer-to-builder`, `peer` —
+  same mechanism (two plain calls) regardless of direction. Any two model IDs,
+  either role.
+- **Small calls, on purpose.** `consult_context: latest-turn` (default) sends
+  the reviewer just the task + the builder's latest output — cost per consult
+  stays flat regardless of how long the run has been going, instead of
+  resending the whole transcript every time.
 - **Configurable frequency.** Check in every turn, every N turns, only at
   checkpoints, only when the builder flags its own uncertainty, or only
   before declaring the task done.
@@ -48,25 +51,26 @@ token_budget: low                # high | medium | low | saver
   `saver` mode that bets a cheaper builder + occasional cheap review nets a
   *lower* total cost than running the builder alone at full effort — flagged
   in the design doc as a hypothesis to validate per-workload, not a free lunch.
-- **Auto-escalation.** When the builder isn't confident, it can trigger a
-  review itself rather than waiting for a scheduled check-in.
+- **Auto-escalation.** When the builder isn't confident, it emits a marker
+  that triggers an out-of-schedule review — cruder than in-band mid-generation
+  triggering, but works identically in every direction.
 
-## Why two engines
+## Why not the native Advisor tool
 
-| | Native (Anthropic Advisor tool) | Custom orchestrator |
+| Concern | Native Advisor tool | This project |
 |---|---|---|
-| Direction | Weaker builder → stronger reviewer **only** (server-enforced) | Any pairing, any direction |
-| Mechanism | One `/v1/messages` call, reviewer runs server-side mid-generation | Two independent calls, orchestrated client-side |
-| "Ask when unsure" | Built in — the builder decides | Hand-rolled marker + policy engine |
-| Maturity | Anthropic-maintained (beta) | Ours to maintain |
+| Direction | Weaker builder → stronger reviewer **only** (server-enforced, 400s otherwise) | Any pairing, any direction |
+| Context per consult | Whole transcript, automatically, every time | We choose — default is just the latest turn |
+| Dependency | Anthropic beta feature, can change | Plain Messages API, no beta header |
 
-Full comparison and reasoning: [`docs/design.md` §2](docs/design.md#2-decision-hybrid-of-native-advisor-tool--custom-orchestrator-adr).
+Full reasoning: [`docs/design.md` §2](docs/design.md#2-decision-fully-custom-orchestrator-no-native-advisor-tool-adr).
 
 ## Roadmap
 
-See [`docs/design.md` §15](docs/design.md#15-suggested-build-order-if-greenlit) for the suggested build order:
-config loader → API client → native-path runner → usage tracking → custom-path
-runner → frequency policies → escalation marker → cost-saver benchmark harness.
+See [`docs/design.md` §14](docs/design.md#14-suggested-build-order-if-greenlit) for the suggested build order:
+config loader → API client → single consult-cycle runner → usage tracking →
+frequency policies → escalation marker → direction coverage → cost-saver
+benchmark harness.
 
 ## Requirements (once built)
 
