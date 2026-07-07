@@ -1,0 +1,14 @@
+[
+  {
+    "id": "coding-fizzbuzz-edge",
+    "prompt": "Write a Python function that prints FizzBuzz for 1..100, but for multiples of 15 print 'FizzBuzzWoof' instead of 'FizzBuzz'. Include a one-line docstring."
+  },
+  {
+    "id": "writing-apology-email",
+    "prompt": "Write a 100-word email apologizing to a client for a missed deadline, without sounding defensive or over-promising a new date."
+  },
+  {
+    "id": "reasoning-riddle",
+    "prompt": "A farmer has 17 sheep. All but 9 die. How many are left? Explain your reasoning in one sentence."
+  }
+]

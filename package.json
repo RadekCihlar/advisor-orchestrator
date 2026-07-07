@@ -1,0 +1,13 @@
+{
+  "name": "advisor-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "run": "tsx src/cli.ts run",
+    "bench": "tsx src/cli.ts bench"
+  }
+}
