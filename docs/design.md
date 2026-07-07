@@ -65,7 +65,9 @@ No server, no database, no persistent state beyond an optional local usage log. 
 
 | Dependency | Protocol | Failure behavior | Owner |
 |---|---|---|---|
-| Anthropic Messages API | HTTPS/JSON | 429/5xx → retry w/ backoff (standard); a failed reviewer call is caught, logged, and the builder's output ships **without** review rather than aborting the run | User's own API key/billing |
+| Anthropic Messages API (first-party, or Claude Platform on AWS, or Google Vertex AI, or Amazon Bedrock) | HTTPS/JSON | 429/5xx → retry w/ backoff (standard); a failed reviewer call is caught, logged, and the builder's output ships **without** review rather than aborting the run | User's own API key/billing, or GCP/AWS project credentials depending on provider |
+
+**Why this matters for this project specifically:** the whole reason to build this instead of just using Claude Code's built-in `advisor()` tool (see README) is running *outside* a Claude Code session — including against a provider Claude Code itself doesn't route through. `client/` (§6) should stay a thin wrapper over whichever provider client the deployment needs (`AnthropicVertex` for Vertex, `AnthropicBedrock`/Mantle for Bedrock, plain `Anthropic()` for first-party) — same request/response shape across all of them, so `runner/` and `policy/` don't need to know which provider is underneath. Near-term target: Google Vertex AI.
 
 ---
 

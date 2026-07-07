@@ -15,6 +15,21 @@ pairing in either direction.
 > order). This repo exists so the plan has a home before the first line of
 > code lands.
 
+## `advisor()` vs. this repo
+
+Claude Code ships a built-in `advisor()` tool — free, zero setup, already
+does asymmetric-priced executor+advisor consults. **If you're working
+interactively in Claude Code, use that. Don't use this repo for that case —
+it'd be redundant.**
+
+`advisor()` only exists *inside a live Claude Code session*, though. It can't
+be called from a script, a CI job, a background service, or a deployment
+wired to your own Anthropic/Vertex/Bedrock project. That's the actual reason
+this repo exists: **standalone, scriptable, runnable outside Claude Code
+entirely** — currently eyed for a Google Vertex AI–hosted use case, but the
+design is provider-agnostic (plain Messages-API-shaped calls, swap the client
+per §4).
+
 ## The idea
 
 ```yaml
