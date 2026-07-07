@@ -8,6 +8,17 @@
 // call loads ambient CLAUDE.md/memory context (observed ~52k cache-read
 // tokens on a trivial prompt), which is real overhead but doesn't cost real
 // money on a subscription plan.
+//
+// --tools "" is mandatory, not optional: without it, a "call" is a full
+// agentic session with file/bash access, not a text completion. Verified
+// live: without --tools "", a builder call actually wrote a file to disk
+// unprompted, and a reviewer call stalled on an unresolvable permission
+// prompt ("needs approval, waiting on you") since headless mode can't
+// answer interactive dialogs. --allowedTools ""/--disallowedTools with an
+// explicit tool-name list both failed to fully block this (empty
+// --allowedTools still let Write through; --disallowedTools missed
+// PowerShell, a tool name distinct from Bash on this platform). --tools ""
+// is the one flag documented to disable the entire toolset outright.
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -34,7 +45,7 @@ const NEEDS_SHELL = process.platform === 'win32' && CLAUDE_BIN.toLowerCase().end
 export async function callClaudeCode(model: string, prompt: string): Promise<CallResult> {
   const { stdout } = await execFileAsync(
     CLAUDE_BIN,
-    ['-p', prompt, '--model', model, '--output-format', 'json'],
+    ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', ''],
     {
       maxBuffer: 10 * 1024 * 1024,
       shell: NEEDS_SHELL,
