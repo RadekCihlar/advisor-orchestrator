@@ -23,6 +23,7 @@ export interface ConsultRound {
   builder: CallResult;
   reviewer: CallResult | null;
   approved: boolean;
+  reviewerError?: string;
 }
 
 export interface RunResult {
@@ -44,21 +45,33 @@ export async function run(opts: RunOptions): Promise<RunResult> {
         ? `Task: ${opts.task}`
         : `Task: ${opts.task}\n\nYour previous attempt:\n${builderOutput}\n\nReviewer feedback:\n${feedback}\n\nRevise your attempt accordingly. Output only the revised attempt.`;
 
+    // Builder failures propagate uncaught: with no builder pass this round,
+    // there's nothing to ship, so the whole run legitimately fails here. The
+    // caller (cli.ts bench loop) catches per-arm and moves to the next one.
     const builderResult = await call(opts.builder, builderPrompt);
     builderOutput = builderResult.text;
 
     const isLastRound = round === maxConsults;
     let reviewerResult: CallResult | null = null;
     let approved = false;
+    let reviewerError: string | undefined;
 
     if (!isLastRound) {
       const reviewerPrompt = `You are reviewing another AI's work.\n\nTask: ${opts.task}\n\nIts output:\n${builderOutput}\n\nGive a short, specific critique of concrete problems only. If it is already correct and complete, respond with exactly "APPROVED" and nothing else.`;
-      reviewerResult = await call(opts.reviewer, reviewerPrompt);
-      feedback = reviewerResult.text;
-      approved = feedback.trim().toUpperCase().startsWith('APPROVED');
+      try {
+        reviewerResult = await call(opts.reviewer, reviewerPrompt);
+        feedback = reviewerResult.text;
+        approved = feedback.trim().toUpperCase().startsWith('APPROVED');
+      } catch (err) {
+        // Reviewer failed (rate limit, upstream error, ...) but the builder
+        // pass this round already succeeded — ship it without review instead
+        // of throwing away a valid result.
+        reviewerError = err instanceof Error ? err.message : String(err);
+        approved = true;
+      }
     }
 
-    rounds.push({ round, builder: builderResult, reviewer: reviewerResult, approved });
+    rounds.push({ round, builder: builderResult, reviewer: reviewerResult, approved, reviewerError });
 
     if (approved) break; // reviewer satisfied — stop early, don't burn remaining consults
   }

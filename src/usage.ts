@@ -28,8 +28,12 @@ export function printUsage(result: RunResult): void {
     }
   }
 
+  const lastRound = result.rounds.at(-1);
   console.log(`  mode: ${result.mode}`);
-  console.log(`  rounds: ${result.rounds.length}${result.rounds.at(-1)?.approved ? ' (reviewer approved early)' : ''}`);
+  console.log(`  rounds: ${result.rounds.length}${lastRound?.approved ? ' (reviewer approved early)' : ''}`);
+  if (lastRound?.reviewerError) {
+    console.log(`  note: reviewer call failed, shipped builder output without review — ${lastRound.reviewerError}`);
+  }
   console.log(`  tokens: ${inputTokens} in / ${outputTokens} out${callsWithoutUsage ? ` (${callsWithoutUsage} local call(s) report no token count)` : ''}`);
   if (claudeCodeCalls > 0) {
     console.log(`  notional cost (subscription-covered, NOT a real charge): $${notionalCost.toFixed(4)} across ${claudeCodeCalls} claude-code call(s)`);

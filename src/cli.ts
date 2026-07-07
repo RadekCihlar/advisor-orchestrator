@@ -111,7 +111,14 @@ async function main() {
           const builder = defaultBuilder;
           const reviewer = mode === 'self-review' ? builder : defaultReviewer;
           console.log(`\n### task=${t.id} run=${i + 1} mode=${mode}`);
-          await runOne(t.prompt, mode, builder, reviewer, consults);
+          try {
+            await runOne(t.prompt, mode, builder, reviewer, consults);
+          } catch (err) {
+            // Builder-side failure (rate limit, upstream error, ...) with no
+            // output to ship for this arm — log and move to the next arm
+            // instead of aborting the whole benchmark.
+            console.error(`  ERROR: ${err instanceof Error ? err.message : String(err)} — skipping this arm.`);
+          }
         }
       }
     }
