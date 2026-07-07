@@ -239,3 +239,32 @@ Between design and build, the requirement changed: **no Anthropic Console API ke
 - Headless mode waits ~3s for stdin before proceeding if not explicitly closed — set `stdio: ['ignore', 'pipe', 'pipe']` to skip the wait on every call.
 
 **Provider-agnostic client-swap idea from §4 (Vertex/Bedrock) is moot for now** — there's no paid-API code path left to swap a provider under. Revisit if a metered-API engine option gets added back later.
+
+---
+
+## 16. First real benchmark, the cost problem it found, and the fix plan (2026-07-07)
+
+**What shipped this session, in order:**
+1. `--tools ""` added to the `claude-code` engine (§15's client) — without it, headless calls ran as full agentic sessions (one builder call wrote a stray file to disk unprompted; a reviewer call stalled on an unanswerable permission prompt). This was invalidating every result — fixed and verified live before any benchmark numbers below were collected.
+2. Bench-loop error handling — a failed/rate-limited call used to crash the entire `bench` run (hit a real subscription 429 mid-run, killed everything). Fixed to match this doc's own §8 intent: reviewer failure ships the builder's output without review and logs a note (`runner.ts`); builder failure still throws (nothing to ship that round) but the `bench` loop (`cli.ts`) now catches per-arm, logs, and moves to the next task/mode instead of exiting.
+3. A full clean 3-task × 3-arm run (sonnet builder, opus reviewer, `benchmark/tasks.json`) — first trustworthy numbers.
+
+**Results — quality:** all three arms produced a correct answer on all 3 tasks. No arm caught an actual defect the others missed; these 3 tasks were easy enough that baseline alone already nailed them. `advised` did add small, real polish twice — a one-line rationale comment on the fizzbuzz branch order, and a softer, more specific apology-email rewrite that took 3 rounds (opus didn't rubber-stamp round 1, the only arm where real back-and-forth happened) — but nothing that changed correctness.
+
+**Results — cost, summed across all 3 tasks:**
+
+| Arm | Total tokens | vs. baseline |
+|---|---|---|
+| baseline | 1,347 | 1x |
+| self-review | 2,313 | 1.7x |
+| advised | 19,017 | **14x** |
+
+**Root cause, verified live (correcting an earlier wrong guess in chat — logged here so it isn't repeated):** first guess was "opus and sonnet never share cache." Retested directly: two back-to-back headless opus calls showed the *second* one hit `cache_read_input_tokens: 9999` / `cache_creation_input_tokens: 0` — full reuse. Caching across separate `claude -p` processes works fine. What actually happened in the benchmark: opus was only called 2–5 times total in the whole run, and the *first* opus call of the run eats a one-time cold-start tax (ambient CLAUDE.md/system-prompt block, ~6,000–10,000 tokens, billed as `cache_creation` not a discounted `cache_read`). This is visible in the run's own numbers — opus's cost per call dropped from $0.2666 (fizzbuzz, opus's 1st call) to $0.0886 (riddle, opus's last call), ~3x cheaper, as the cache warmed up over the run. `--system-prompt <custom>` was tested as a possible fix (replace the default CLAUDE.md-laden prompt) — verified live it does **not** help; ambient per-call context comes in through a different injection point than the system-prompt flag controls, and total tokens were the same or worse.
+
+**Goals for next session (not yet built):**
+
+- **Warm the reviewer's cache once before the real loop** — fire one cheap throwaway call in the reviewer's model at `bench` startup, so the cold-start tax lands on a warm-up call instead of on task 1's real numbers. Cheapest fix, do this first.
+- **Escalation instead of always-advised** — self-review every round (same model, cache stays warm, already-measured 1.7x), only invoke the different/bigger reviewer on the last round or when self-review doesn't approve. Cuts opus call *count*, compounds with the warm-up fix. This revives §9/§10's escalation idea, dropped from v1 scope — worth reconsidering now there's a measured reason to want it.
+- **Observability gap:** `usage.ts` only prints raw `input_tokens`; `cache_creation_input_tokens`/`cache_read_input_tokens` are captured on the `claude-code` engine's `CallResult` (`cacheReadTokens`) but never surfaced. Fix this before trusting any future token comparison — right now the printed "tokens: X in" numbers understate what actually moved by the cache-creation amount, and hide exactly the warm-up-vs-cold-start effect described above.
+- **Re-run the benchmark** once the above land — current numbers are a single run, 3 tasks, `repeat: 1`, still just a directional smoke test (§13's third risk, still unvalidated).
+- **Still open from earlier sections, unchanged:** Claude Code skill wrapper (§12 non-goal, fast-follow), escalation via structured marker rather than string (§9's "future" note), `saver`-mode validation (§10, §13).
