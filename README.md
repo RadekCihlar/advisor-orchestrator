@@ -4,6 +4,8 @@
 
 # loupe
 
+[![ci](https://github.com/RadekCihlar/advisor-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RadekCihlar/advisor-orchestrator/actions/workflows/ci.yml)
+
 **A builder + reviewer loop for LLMs — and a harness that tells you whether the review is actually worth it.**
 
 One model does the work; another takes a closer look. loupe runs that loop across providers (Claude, Codex, local Ollama), with any model in either role, and — the part that matters — **measures** whether the second look improves quality, and at what token cost. More calls aren't free; a reviewer only earns its keep if it beats the cheaper option.
@@ -80,6 +82,11 @@ npm run typecheck   # tsc --noEmit
 ## Status & honest limits
 
 Works end-to-end, verified live: multi-provider, exec grading, the verify loop, real error handling, reproducible verdicts, 49 unit tests + a clean typecheck. Known limits: `judge` grading needs an independent model to avoid self-enhancement bias; the `codex` engine is written to the published spec but not yet run against an installed codex; direct-API (key-based) engines are a designed extension point, not built. Full design + build history: [`docs/design.md`](docs/design.md).
+
+## Roadmap
+
+Where loupe is headed — prioritized for better / cleaner / more useful:
+[`ROADMAP.md`](ROADMAP.md).
 
 ## License
 
