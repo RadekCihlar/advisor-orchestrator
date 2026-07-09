@@ -1,5 +1,7 @@
 # Advisor Orchestrator — Design Doc (all proposed, nothing built yet)
 
+> **Project renamed to `loupe` (2026-07-09).** Sections below predate the rename and keep the old name "advisor-orchestrator" for historical accuracy.
+
 Reader: whoever builds this next (you, or a fresh Claude Code session with this doc pasted in). Mode: **forward** — greenfield, no existing code to verify against.
 
 **Revision note:** v1 of this doc proposed a hybrid — Anthropic's beta `advisor_20260301` tool for the common direction, a hand-rolled orchestrator for everything else. Superseded: this revision drops the beta tool entirely. Single engine, our own small independent API calls, every direction. Reasons in §2.
