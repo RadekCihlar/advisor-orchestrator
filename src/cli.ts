@@ -9,7 +9,7 @@ import { loadConfig, type AdvisorConfig } from './config.js';
 import { planSelection, type RoleDecision } from './selection.js';
 import { grade, type Grader } from './grader.js';
 import { aggregate, formatReport, reportJson, type RunRecord } from './report.js';
-import { createInterface } from 'node:readline/promises';
+import { createInterface, type Interface } from 'node:readline/promises';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -68,19 +68,16 @@ function roleInputFrom(flags: Record<string, string | true>, prefix: string): { 
   };
 }
 
-async function ask(question: string, def?: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question(def ? `${question} [${def}]: ` : `${question}: `)).trim();
-    return answer || def || '';
-  } finally {
-    rl.close();
-  }
+// One readline interface is reused for every question (a fresh one per question
+// drops buffered/piped input on the 2nd prompt). Caller owns create + close.
+async function ask(rl: Interface, question: string, def?: string): Promise<string> {
+  const answer = (await rl.question(def ? `${question} [${def}]: ` : `${question}: `)).trim();
+  return answer || def || '';
 }
 
-// Interactive engine/model pick for a role. Only reached in a TTY (planSelection
-// returns 'prompt' only when isTTY), so blocking on stdin here is safe.
+// Interactive engine/model pick for a role, using the shared readline interface.
 async function promptForRole(
+  rl: Interface,
   role: 'builder' | 'reviewer',
   knownEngine: string | undefined,
   detected: Array<{ name: string; available: boolean }>,
@@ -91,11 +88,11 @@ async function promptForRole(
     const choices = available.length > 0 ? available : detected.map((d) => d.name);
     console.log(`Select ${role} engine:`);
     choices.forEach((c, i) => console.log(`  ${i + 1}) ${c}`));
-    const pick = await ask(`${role} engine number`, '1');
+    const pick = await ask(rl, `${role} engine number`, '1');
     engine = choices[Number(pick) - 1] ?? choices[0];
   }
   const defModel = getEngine(engine).defaultModels[role];
-  const model = await ask(`${role} model for ${engine}`, defModel);
+  const model = await ask(rl, `${role} model for ${engine}`, defModel);
   if (!model) {
     console.error(`No model given for ${role}.`);
     process.exit(1);
@@ -106,6 +103,7 @@ async function promptForRole(
 // Turn a planSelection decision into a concrete EngineConfig: use it, print a
 // note for an auto-picked default, prompt in a TTY, or exit on error.
 async function resolveDecision(
+  rl: Interface | null,
   role: 'builder' | 'reviewer',
   decision: RoleDecision,
   detected: Array<{ name: string; available: boolean }>,
@@ -119,7 +117,7 @@ async function resolveDecision(
       );
       return decision.config;
     case 'prompt':
-      return promptForRole(role, decision.engine, detected);
+      return promptForRole(rl!, role, decision.engine, detected);
     case 'error':
       console.error(`Error: ${decision.message}`);
       process.exit(1);
@@ -211,8 +209,15 @@ async function main() {
     }
 
     console.log('\nChoose engines (press Enter to accept the default).');
-    const builder = await promptForRole('builder', undefined, detected);
-    const reviewer = await promptForRole('reviewer', undefined, detected);
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    let builder: EngineConfig;
+    let reviewer: EngineConfig;
+    try {
+      builder = await promptForRole(rl, 'builder', undefined, detected);
+      reviewer = await promptForRole(rl, 'reviewer', undefined, detected);
+    } finally {
+      rl.close();
+    }
 
     // Live check — non-fatal, but tells you now if auth/quota/region is off.
     for (const [role, cfg] of [
@@ -272,10 +277,16 @@ async function main() {
       defaultModelFor: (engine, role) => getEngine(engine).defaultModels[role],
     });
 
-    const builder = await resolveDecision('builder', plan.builder, detected);
-    const reviewer = plan.reviewer.kind === 'mirror' ? builder : await resolveDecision('reviewer', plan.reviewer, detected);
-
-    await runOne(task, mode, builder, reviewer, consults);
+    const needsPrompt = plan.builder.kind === 'prompt' || plan.reviewer.kind === 'prompt';
+    const rl = needsPrompt ? createInterface({ input: process.stdin, output: process.stdout }) : null;
+    try {
+      const builder = await resolveDecision(rl, 'builder', plan.builder, detected);
+      const reviewer =
+        plan.reviewer.kind === 'mirror' ? builder : await resolveDecision(rl, 'reviewer', plan.reviewer, detected);
+      await runOne(task, mode, builder, reviewer, consults);
+    } finally {
+      rl?.close();
+    }
     return;
   }
 
@@ -309,8 +320,8 @@ async function main() {
       mode: 'advised', // resolve BOTH roles (not the self-review mirror)
       defaultModelFor: (engine, role) => getEngine(engine).defaultModels[role],
     });
-    const benchBuilder = await resolveDecision('builder', plan.builder, detected);
-    const benchReviewer = await resolveDecision('reviewer', plan.reviewer, detected);
+    const benchBuilder = await resolveDecision(null, 'builder', plan.builder, detected);
+    const benchReviewer = await resolveDecision(null, 'reviewer', plan.reviewer, detected);
 
     // Judge engine for `judge` graders. Defaults to the reviewer; override with
     // --judge-engine/--judge-model to make it INDEPENDENT of the arms. A judge
