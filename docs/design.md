@@ -268,3 +268,249 @@ Between design and build, the requirement changed: **no Anthropic Console API ke
 - **Observability gap:** `usage.ts` only prints raw `input_tokens`; `cache_creation_input_tokens`/`cache_read_input_tokens` are captured on the `claude-code` engine's `CallResult` (`cacheReadTokens`) but never surfaced. Fix this before trusting any future token comparison — right now the printed "tokens: X in" numbers understate what actually moved by the cache-creation amount, and hide exactly the warm-up-vs-cold-start effect described above.
 - **Re-run the benchmark** once the above land — current numbers are a single run, 3 tasks, `repeat: 1`, still just a directional smoke test (§13's third risk, still unvalidated).
 - **Still open from earlier sections, unchanged:** Claude Code skill wrapper (§12 non-goal, fast-follow), escalation via structured marker rather than string (§9's "future" note), `saver`-mode validation (§10, §13).
+
+---
+
+## 17. Cost-fix work shipped: observability, warm-up, escalated mode, config, tests
+
+Everything §16 flagged "not yet built" as a next-session goal is now built — except the confirming re-benchmark, which still needs a live subscription/Ollama run and is the immediate next step.
+
+**What shipped, in dependency order:**
+
+1. **Cache-token observability (do-first per §16).** The `claude-code` engine now captures `cache_creation_input_tokens`, not just `cache_read_input_tokens` — `cache_creation` is the field that *is* the one-time cold-start tax, so the old code literally couldn't see the thing that explained the 14x. `usage.ts` now prints `cache: <read> / <creation>` for any run with `claude-code` calls. Without this, no post-fix number would be trustworthy; done first on purpose.
+2. **Cache warm-up at `bench` startup.** Before any arm is timed, `cli.ts` fires one throwaway call to the reviewer model so the cold-start tax lands on the warm-up, not on task 1's real numbers. Best-effort: a failed warm-up is logged, not fatal (the run just eats the cold start as before).
+3. **`escalated` mode (new, 4th arm).** `runner.ts` gains a mode that does cheap self-review every round (builder critiques itself, cache stays warm) and invokes the bigger reviewer **at most once per run** — the first time self-review isn't satisfied. This bounds the expensive reviewer's *call count* (advised calls it every round), compounding with the warm-up. Added to the `bench` arm list so it can be measured head-to-head against `advised`. Revives §9/§10's escalation idea with the measured reason §16 asked for.
+   - **Interpretation note:** §16 said "invoke the bigger reviewer on the last round or when self-review doesn't approve." Implemented as a hard ≤1-escalation-per-run bound (fires on the first self-review non-approval; never again that run). That's the laziest faithful reading; if a later benchmark shows self-review needs the big reviewer more than once on hard tasks, relax the bound then — not before.
+4. **JSON config loader (`src/config.ts`).** `--config <path.json>`, hand-rolled validation, **zero new deps** — chose JSON over the §5/§6 YAML+zod design to keep the repo dependency-free (consistent with §15's "no metered API, stay minimal" turn). Deliberately validates only the knobs the engines actually consume today (`builder`, `reviewer`, `mode`, `consults`); §5's `effort`/`token_budget`/`direction`/`frequency`/`consult_context`/marker/`caching` are omitted until the features behind them exist — accepting them now would be config for values nothing reads. Precedence: built-in defaults < config file < individual CLI flags.
+5. **First test harness.** `node:test` run through `tsx` (`npx tsx --test src/*.test.ts`), 14 tests. `runner.run()` was refactored to take an injectable `callFn` (defaulting to the real engine dispatcher) so the loop's control flow — early-break on approval, reviewer-failure-ships-without-review, the escalated ≤1 bound and feedback-flow — is unit-testable with a fake engine, no API calls. `config.ts` validation rejections are covered too.
+
+**Verified this session:** 14/14 unit tests pass; the full CLI module graph compiles under `tsx`; an invalid `--config` file throws its validation error *before* any engine call. **Not verified:** the live re-benchmark — §16's numbers are still the last real data.
+
+**Immediate next step (unchanged from §16, now unblocked):** run `bench` again with the warm-up + observability + `escalated` arm and record the post-fix token table here. The specific hypothesis to check: `escalated` keeps `advised`'s catches while its cache-creation total and reviewer call count drop toward `self-review`'s.
+
+---
+
+## 18. Multi-provider engines (2026-07-08)
+
+Scope grew: work across providers, not just ambient Claude Code. Full design in
+[`docs/specs/2026-07-08-multi-provider-engines.md`](specs/2026-07-08-multi-provider-engines.md);
+this is the session log.
+
+**What triggered it:** a `bench` run failed every arm. Root cause (found by
+surfacing the error claude wrote to stdout — see the `parseClaudeResult` fix):
+this machine's `claude` routes through **Google Vertex AI**
+(`CLAUDE_CODE_USE_VERTEX`), which returned `429 RESOURCE_EXHAUSTED` (quota) for
+both sonnet and opus. That killed the §15 assumption that these calls are
+"free/subscription-only" — they're metered here. The user's response was to
+generalize the tool to any provider with per-role provider choice.
+
+**What shipped:**
+- **Engine interface + registry** (`src/engines/types.ts`, `index.ts`) — one
+  `CallResult` shape for all providers; `runner`/`config`/`cli` go through the
+  interface, so new engines are one registry entry. This revives §4/§15's
+  provider-agnostic idea, dropped when the premise was "no paid API at all".
+- **`codex` engine** (`src/engines/codex.ts`) — headless `codex exec --json`
+  (read-only sandbox + `-a never` = the codex analog of claude's `--tools ""`).
+  Parser is fixture-tested; **not verified against an installed codex** (none on
+  this machine) — flagged in-file.
+- **`local` + `claude-code`** refactored behind the interface (no behavior
+  change; the 429-surfacing fix retained).
+- **Detection + `providers` command** — each engine self-reports; `advisor
+  providers` prints the availability table.
+- **Selection** (`src/selection.ts`, pure + unit-tested) — precedence flags >
+  config > interactive prompt (TTY) > auto-detected default. Cross-provider
+  pairing is free via the already-independent builder/reviewer configs.
+- **Direct-API (key-based) engines** — designed extension point, **not built**
+  (add when a keyed workload needs them; secrets via env only).
+
+**Verified:** 29/29 unit tests; `advisor providers` correct live (claude-code ✓
+Vertex, codex ✗, local ✗); unknown-engine guard exits before any call. **Not
+verified:** any live codex or cross-provider run (codex not installed; claude
+still 429). Test count: 16 → 29.
+
+---
+
+## 19. Evaluation layer — make the benchmark answer its own question (2026-07-08)
+
+**The core problem this fixes:** the tool measured cost (tokens) but never
+**quality**, so it could not actually answer "does the reviewer help, and at what
+cost?" §16's "all arms were correct" was a human eyeball on 3 trivial tasks with
+no headroom — which is how a 14× cost looked like pure waste. Without a quality
+measure, that verdict was unfounded in either direction.
+
+**What shipped:**
+- **Grader** (`src/grader.ts`, pure + injectable) — scores an output 0–1.
+  `includes` (fraction of required strings), `regex` (match/no-match), and
+  `judge` (an LLM scores 0–10 against a rubric; engine injectable, so tested
+  offline). Execution-based grading (run code/tests) deliberately deferred —
+  running model-generated code needs a sandbox (a security boundary, §13).
+- **Report** (`src/report.ts`, pure) — `aggregate` + `formatReport` produce the
+  product: a per-arm quality×cost table (mean score + range, mean in/out/total
+  tokens, cache-creation) and a **verdict** — best quality, cheapest-at-top-
+  quality, best quality-per-token, and each arm's Δquality-vs-baseline at N×
+  cost.
+- **Headroom tasks** (`benchmark/tasks.json`) — every task now has a `grader`,
+  plus tasks single-pass models actually slip on (no-`e` sentence, bat-and-ball
+  trap, exact-word-count) so arms can *differ* and grading is meaningful.
+- **`bench` wiring** — grades each arm's final output (judge graders use the
+  reviewer model; a grading failure leaves the run ungraded, never aborts),
+  collects records, prints the report. `runOne` now returns its `RunResult`;
+  `tallyTokens` extracted from `usage.ts` and reused.
+- **`--tasks <path>`** — point `bench` at your own workload; the real value is
+  "which mode is worth it for *your* tasks," not the built-in set.
+
+**Verified:** 40/40 unit tests; the report renders correctly on fixture records
+(quality×cost table + verdict). **Not verified live:** a real graded `bench` run
+(engines still Vertex-429; judge grading also needs a working engine) — but the
+scoring/aggregation/verdict are pure and fully unit-tested, so they're correct
+independent of a live run. Test count: 29 → 40.
+
+**Why this is the highest-leverage change:** it turns the project from "prints
+outputs + tokens" into "tells you, per workload, which mode gives the best
+quality per token." That's the actual product. Positioning sharpens too: not
+"another advisor," but *the harness that tells you whether advising is worth it
+for your tasks.*
+
+**Next (roadmap, not built):** execution-grounded code review (reviewer runs the
+tests and feeds failures back — where a second pass most clearly wins, needs
+sandboxing); the §9 self-uncertainty escalation marker; parallel `bench` for
+wall-clock; writing report records to a JSON file for later analysis.
+
+---
+
+## 20. Review-driven fixes + execution-grounded core (2026-07-09)
+
+Three independent review agents (correctness, product-skeptic, YAGNI) checked the
+work. They converged on real confounds in the §19 evaluation layer; this section
+records the fixes and the execution-grounded pivot the product-skeptic pushed
+(and the other two corroborated).
+
+**Methodology fixes (the eval layer was measuring itself):**
+- **Independent judge.** The `judge` grader used the reviewer model (opus), which
+  also shapes the `advised`/`escalated` outputs — self-enhancement on judge
+  tasks. Added `--judge-engine`/`--judge-model` and a printed caveat when the
+  judge coincides with an arm's builder/reviewer. `bench` also now takes a real
+  judge, not a hardcoded one.
+- **Honest cost proxy.** The proxy omitted cache-read — but the CLI engines
+  re-read a big ambient block on EVERY call, so cache-read is what scales with
+  reviewer call-count. Excluding it made a 5-call arm look ~1× a 1-call arm. Now
+  `total = input + output + cacheRead + cacheCreation`, with a cacheRead column.
+  (Illustratively, `advised` now reads ~5× baseline, not ~1×.)
+- **`bench` honors providers.** It was hardwired to claude sonnet/opus, so it
+  ignored the entire multi-provider layer and couldn't fall back to local/codex
+  on the 429'd machine. Now resolved via config/flags through `planSelection`.
+- **Grader false-positives.** `reasoning-riddle` matched the "9" echoed from the
+  prompt; `constraint-no-e` matched the empty string. Both tightened.
+  `parseJudgeScore` now prefers `N/10` / the last integer (dodges scale-echoes).
+- **Cross-provider selection bug.** `--builder-engine codex` with a config of
+  `{claude-code, sonnet}` used to run codex with model "sonnet"; a flag engine
+  override now drops a different engine's config model and uses the default.
+
+**Execution-grounded core (the strategic pivot — test result as ground truth):**
+- **`exec` grader.** Runs the model's code against `tests` in a subprocess
+  (timeout, throwaway temp dir; security ceiling documented in `grader.ts` — not
+  a syscall sandbox). Score = tests pass. No LLM-judge confound.
+- **`verify` mode.** A programmatic verifier is the in-loop reviewer: failures
+  feed back to the builder, no LLM reviewer, no tokens. The **same** exec grader
+  is BOTH the in-loop signal AND the scorer — removing both thumbs from the
+  scale, on the one task class (code/math) where a second pass reliably beats
+  solo. `bench` adds a `verify` arm wherever a task has an exec grader.
+
+**YAGNI cuts:** write-only `CallResult.engine`; `DetectResult.models` → a count;
+the report's redundant "best quality per token" ranking.
+
+**Verified:** 44/44 unit tests (the exec grader runs real `node` subprocesses;
+the `verify` loop is unit-tested with an injected verifier); the report renders
+the honest cost columns. **Not verified live:** a full graded `bench` (claude
+still 429; codex/ollama absent) — but graders, verify loop, cost, and verdict
+are pure/injectable and fully tested. Test count: 41 → 44.
+
+**Why it matters:** with honest cost + an exec grader + `verify`, the report now
+shows the execution-grounded arm winning on BOTH quality and cost — the concrete,
+defensible result the tool previously couldn't produce. That answers the
+product-skeptic's core objection: the value is programmatic verification, and the
+tool now targets and measures exactly that.
+
+---
+
+## 21. Robustness, JSON export, and a typecheck gate (2026-07-09)
+
+Hardening pass + the first real live runs on Vertex (us-east5).
+
+**Live proof (finally ran, opus in `CLOUD_ML_REGION=us-east5`):** the whole
+pipeline works end-to-end on Vertex — generation, exec grading, verify loop,
+error-handling (transient ECONNRESETs shipped/skipped gracefully), reproducible
+n=5 verdicts. Region matters: `eu_multi_region` is 429-quota-dead for every
+model; `us-east5` serves `opus` and `claude-sonnet-4-6` (not sonnet-4-5, not
+sonnet-5). Every *failure* observed live was **ambient output-style
+contamination** — the spawned builder inherits the caller's Explanatory style and
+appends `★ Insight` / backtick prose that breaks the exec grader — never an
+actual algorithm error. Both opus and sonnet-4-6 solve the test tasks reliably,
+so "does review help" is still unproven for lack of a genuinely weak builder.
+
+**Fixes shipped:**
+- **`extractCode` hardened** — strips trailing prose (backtick notes, plain
+  explanatory sentences, ★/─ boxes), not just decorations. This was the dominant
+  false-failure source in the live runs. Still best-effort; the root cure is not
+  inheriting an explanatory style in the first place.
+- **CLI flag validation** — `--mode` checked against `MODES`; `--consults`/
+  `--repeat` must be non-negative integers (a bad value silently ran zero
+  iterations before). `MODES` is now a single exported source — config had been
+  silently missing `verify`.
+- **`local` call timeout** (AbortSignal) so a hung Ollama can't stall a bench;
+  **codex usage summed** across turn events (was overwritten).
+- **`bench --out results.json`** — writes `{meta, stats, records}` so runs
+  accumulate and can be diffed over time (one-shot → real eval harness).
+- **Typecheck gate** — added `tsconfig.json` + `npm run typecheck` (tsc
+  `--noEmit`) and devDeps (tsx/typescript/@types/node). tsc immediately caught
+  real issues tsx had silently ignored: the `stdio` option was **invalid on
+  execFile** (confirming it never suppressed the stdin wait — removed), several
+  `unknown`-typed `res.json()` reads, and a control-flow-narrowing bug in a test.
+  All fixed; `tsc --noEmit` is clean.
+
+**Verified:** 49/49 unit tests pass; `tsc --noEmit` exits 0; `--out` writes valid
+JSON; live Vertex runs produced real reproducible verdicts. **Remaining for a
+real "review helps" result:** a genuinely weak builder (local Ollama small model)
+or a task the strong models actually fail — plus the still-unbuilt §9
+self-uncertainty marker and direct-API engines.
+
+---
+
+## 22. First real "review helps" result — weak local builder + opus reviewer (2026-07-09)
+
+The experiment the whole project was built to run. Builder = `qwen2.5-coder:1.5b`
+(local Ollama, weak, free), reviewer = `opus` (Vertex us-east5); hard task
+(`abbreviate`, the truncate/drop-`.0` trap); n=3, consults=2. Total opus cost
+$0.47 (local builder is free).
+
+```
+arm          runs   score          meaning
+baseline      3     0.00           weak model solo: 0/3 (genuinely wrong code, e.g. 1000 -> "1000M")
+self-review   3     0.00           weak model reviewing itself: 0/3 (can't catch its own error)
+advised       3     0.67 [0-1.00]  opus reviewer: 2/3 fixed   ← review demonstrably helps
+escalated     3     0.00           one opus hint wasn't enough: 0/3
+verify        3     0.33 [0-1.00]  test-failure fed back: 1/3 fixed
+```
+
+**Verified honest, not a grader artifact:** the baseline output arrived in a
+clean ```` ```javascript ```` fence, so `extractCode` got clean code — and that
+code is genuinely wrong. This is a real capability failure the reviewer fixed.
+
+**Findings:**
+- **Review helps when the builder is weaker than the reviewer** — solo 0/3 →
+  advised 2/3. This is the tool's core thesis, finally shown on real data.
+- **Self-review can't rescue a weak model** (0/3) — a critic no better than the
+  author adds cost, not quality. Confirms why `advised` (a *different*, stronger
+  reviewer) is the arm that matters.
+- **Bounded escalation backfired on a very weak builder** (0/3 vs advised's 2/3):
+  one opus hint (escalated) wasn't enough; the builder needed opus feedback
+  *every* round (advised). The cost-saver assumes the builder can run with a
+  single nudge — false when it's this weak. Genuinely decision-relevant.
+- **Programmatic verify recovered 1/3** — feeding the exact failing assertion
+  back sometimes let even the weak model self-correct, at ~1/20th advised's cost.
+
+**Caveat:** n=3 is directional; advised's "88× baseline cost" is inflated because
+the local baseline is ~free — absolute opus cost was ~$0.15/advised run. Minor
+tech debt surfaced: the grader's failure *detail* prints the stack-trace tail
+instead of the thrown assertion message (the score is correct; the message is
+unhelpful).

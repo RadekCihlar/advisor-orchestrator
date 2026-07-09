@@ -1,14 +1,44 @@
 [
   {
     "id": "coding-fizzbuzz-edge",
-    "prompt": "Write a Python function that prints FizzBuzz for 1..100, but for multiples of 15 print 'FizzBuzzWoof' instead of 'FizzBuzz'. Include a one-line docstring."
+    "prompt": "Write a Python function that prints FizzBuzz for 1..100, but for multiples of 15 print 'FizzBuzzWoof' instead of 'FizzBuzz'. Include a one-line docstring.",
+    "grader": { "type": "includes", "must": ["FizzBuzzWoof", "def ", "range"] }
   },
   {
     "id": "writing-apology-email",
-    "prompt": "Write a 100-word email apologizing to a client for a missed deadline, without sounding defensive or over-promising a new date."
+    "prompt": "Write a 100-word email apologizing to a client for a missed deadline, without sounding defensive or over-promising a new date.",
+    "grader": {
+      "type": "judge",
+      "rubric": "A roughly 100-word client email apologizing for a missed deadline that takes responsibility, is not defensive or blame-shifting, and does NOT promise a specific new delivery date."
+    }
   },
   {
     "id": "reasoning-riddle",
-    "prompt": "A farmer has 17 sheep. All but 9 die. How many are left? Explain your reasoning in one sentence."
+    "prompt": "A farmer has 17 sheep. All but 9 die. How many sheep are left? Reply with just the number.",
+    "grader": { "type": "regex", "pattern": "^\\D*9\\D*$" }
+  },
+  {
+    "id": "reasoning-bat-and-ball",
+    "prompt": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost? Give the amount only.",
+    "grader": { "type": "regex", "pattern": "0\\.05|\\b5\\s*cent", "flags": "i" }
+  },
+  {
+    "id": "constraint-no-e",
+    "prompt": "Write ONE grammatical English sentence of at least eight words that does not contain the letter e (uppercase or lowercase). Output only the sentence, nothing else.",
+    "grader": { "type": "regex", "pattern": "^\\s*([^\\seE]+\\s+){7,}[^\\seE]+\\s*$" }
+  },
+  {
+    "id": "constraint-exact-words",
+    "prompt": "Write a sentence about the ocean that is exactly seven words long. Output only the sentence.",
+    "grader": { "type": "judge", "rubric": "The response is a single sentence about the ocean containing exactly seven words." }
+  },
+  {
+    "id": "coding-exec-vowels",
+    "prompt": "Write a Python function `count_vowels(s)` that returns the number of vowels (a, e, i, o, u; case-insensitive) in the string s. Output only the function.",
+    "grader": {
+      "type": "exec",
+      "language": "python",
+      "tests": "assert count_vowels('hello') == 2\nassert count_vowels('XYZ') == 0\nassert count_vowels('AeIoU') == 5\nassert count_vowels('') == 0"
+    }
   }
 ]
