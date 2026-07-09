@@ -3,5 +3,6 @@ dist/
 *.log
 .env
 # per-user setup output + benchmark results — not committed
+loupe.config.json
 advisor.config.json
 results.json

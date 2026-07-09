@@ -30,7 +30,7 @@ export async function call(cfg: EngineConfig, prompt: string): Promise<CallResul
   return getEngine(cfg.engine).call(cfg.model, prompt);
 }
 
-// Runs every registered engine's detect() concurrently — backs `advisor providers`
+// Runs every registered engine's detect() concurrently — backs the `providers` command
 // and the interactive selection prompt.
 export async function detectAll(): Promise<Array<{ name: string } & DetectResult>> {
   return Promise.all(

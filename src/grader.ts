@@ -90,7 +90,7 @@ export function extractCode(output: string): string {
 async function runProgram(language: 'python' | 'node', program: string, timeoutMs: number): Promise<GradeResult> {
   const interp = language === 'python' ? 'python3' : 'node';
   const filename = language === 'python' ? 'prog.py' : 'prog.js';
-  const dir = await mkdtemp(join(tmpdir(), 'advisor-exec-'));
+  const dir = await mkdtemp(join(tmpdir(), 'loupe-exec-'));
   try {
     await writeFile(join(dir, filename), program);
     await execFileAsync(interp, [join(dir, filename)], { timeout: timeoutMs, maxBuffer: 1024 * 1024 });

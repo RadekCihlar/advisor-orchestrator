@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 300" width="1100" height="300" role="img" aria-label="loupe — a closer look at what your model made">
+  <rect width="1100" height="300" rx="20" fill="#0f1419"/>
+
+  <!-- loupe: a lens inspecting two models (builder -> reviewer) -->
+  <g stroke-linecap="round">
+    <!-- handle -->
+    <line x1="201" y1="201" x2="278" y2="278" stroke="#e6edf3" stroke-width="22"/>
+    <!-- lens glass -->
+    <circle cx="150" cy="150" r="66" fill="#11212b"/>
+    <circle cx="150" cy="150" r="72" fill="none" stroke="#e6edf3" stroke-width="11"/>
+    <!-- two models under the lens -->
+    <circle cx="123" cy="150" r="12" fill="#3fb6a8"/>
+    <circle cx="177" cy="150" r="12" fill="#f6c453"/>
+    <line x1="137" y1="150" x2="161" y2="150" stroke="#c9d1d9" stroke-width="5"/>
+    <polygon points="161,143 175,150 161,157" fill="#c9d1d9" stroke="none"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="322" y="172" font-family="Inter, Helvetica, Arial, sans-serif" font-size="140" font-weight="800" letter-spacing="1" fill="#e6edf3">loupe</text>
+  <circle cx="738" cy="158" r="12" fill="#f6c453"/>
+
+  <!-- tagline -->
+  <text x="326" y="228" font-family="Inter, Helvetica, Arial, sans-serif" font-size="31" fill="#8b949e">a closer look at what your model made</text>
+</svg>

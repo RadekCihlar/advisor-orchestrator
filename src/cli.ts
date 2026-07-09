@@ -48,13 +48,13 @@ function intFlag(flags: Record<string, string | true>, name: string, def: number
   return n;
 }
 
-// --config wins; else auto-load ./advisor.config.json if present (written by
+// --config wins; else auto-load ./loupe.config.json if present (written by
 // `setup`) so the tool "just works" after onboarding, no flags needed.
 function loadConfigAuto(flags: Record<string, string | true>): Partial<AdvisorConfig> {
   if (typeof flags.config === 'string') return loadConfig(flags.config);
-  if (existsSync('advisor.config.json')) {
-    console.log('Using advisor.config.json');
-    return loadConfig('advisor.config.json');
+  if (existsSync('loupe.config.json')) {
+    console.log('Using loupe.config.json');
+    return loadConfig('loupe.config.json');
   }
   return {};
 }
@@ -139,12 +139,13 @@ const USAGE = `Usage:
 
   tsx src/cli.ts setup
     Interactive first-run: detect providers, pick + verify builder/reviewer,
-    and write advisor.config.json (auto-loaded by run/bench afterward).
+    and write loupe.config.json (auto-loaded by run/bench afterward).
 
   tsx src/cli.ts providers
     List detected providers — which engines are usable on this machine.
 
-  tsx src/cli.ts bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json] [--out results.json]
+  tsx src/cli.ts bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json]
+    [--out results.json] [--fail-under 0.8]  (exit non-zero if best arm < bar — a CI gate)
     [--builder-engine X] [--builder-model X] [--reviewer-engine X] [--reviewer-model X]
     [--judge-engine X] [--judge-model X]   (judge scores "judge" graders; make it
                                             INDEPENDENT of the arms to avoid bias)
@@ -234,8 +235,8 @@ async function main() {
     }
 
     const config = { builder, reviewer, mode: 'advised' as Mode, consults: 2 };
-    writeFileSync('advisor.config.json', JSON.stringify(config, null, 2) + '\n');
-    console.log('\nWrote advisor.config.json — run/bench auto-load it. Now just:');
+    writeFileSync('loupe.config.json', JSON.stringify(config, null, 2) + '\n');
+    console.log('\nWrote loupe.config.json — run/bench auto-load it. Now just:');
     console.log('  npx tsx src/cli.ts run "your task here"');
     return;
   }
@@ -431,6 +432,26 @@ async function main() {
       };
       writeFileSync(flags.out, JSON.stringify(reportJson(meta, stats, records), null, 2));
       console.log(`\nWrote results to ${flags.out}`);
+    }
+
+    // CI quality gate: fail if even the best arm can't clear the bar.
+    if (typeof flags['fail-under'] === 'string') {
+      const bar = Number(flags['fail-under']);
+      if (!Number.isFinite(bar)) {
+        console.error(`Error: --fail-under must be a number 0..1 (got "${flags['fail-under']}")`);
+        process.exit(1);
+      }
+      const scored = stats.map((s) => s.meanScore).filter((x): x is number => x !== null);
+      if (scored.length === 0) {
+        console.error('Cannot apply --fail-under: no graded arms (add graders to the task file).');
+        process.exit(1);
+      }
+      const best = Math.max(...scored);
+      if (best < bar) {
+        console.error(`\nFAIL: best arm mean score ${best.toFixed(2)} < --fail-under ${bar}`);
+        process.exit(1);
+      }
+      console.log(`\nPASS: best arm mean score ${best.toFixed(2)} >= --fail-under ${bar}`);
     }
     return;
   }
