@@ -4,7 +4,7 @@
 
 # loupe
 
-[![ci](https://github.com/RadekCihlar/advisor-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RadekCihlar/advisor-orchestrator/actions/workflows/ci.yml)
+[![ci](https://github.com/RadekCihlar/Loupe/actions/workflows/ci.yml/badge.svg)](https://github.com/RadekCihlar/Loupe/actions/workflows/ci.yml)
 
 **A builder + reviewer loop for LLMs — and a harness that tells you whether the review is actually worth it.**
 
