@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { run, MODES, type Mode, type RunResult } from './runner.js';
@@ -12,6 +12,9 @@ import { aggregate, formatReport, reportJson, type RunRecord } from './report.js
 import { createInterface, type Interface } from 'node:readline/promises';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const LOG_PATH = join(here, '..', 'usage.jsonl');
+
+const BOOL_FLAGS = new Set(['json', 'help']); // never consume the next arg as a value
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -22,7 +25,7 @@ function parseArgs(argv: string[]) {
     if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = args[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
+      if (!BOOL_FLAGS.has(key) && next !== undefined && !next.startsWith('--')) {
         flags[key] = next;
         i++;
       } else {
@@ -53,7 +56,7 @@ function intFlag(flags: Record<string, string | true>, name: string, def: number
 function loadConfigAuto(flags: Record<string, string | true>): Partial<AdvisorConfig> {
   if (typeof flags.config === 'string') return loadConfig(flags.config);
   if (existsSync('loupe.config.json')) {
-    console.log('Using loupe.config.json');
+    console.error('Using loupe.config.json'); // stderr: --json keeps stdout machine-pure
     return loadConfig('loupe.config.json');
   }
   return {};
@@ -128,7 +131,11 @@ async function resolveDecision(
 
 const USAGE = `Usage:
   tsx src/cli.ts run "<task>" [--mode baseline|self-review|advised|escalated] [--consults N]
-    [--config path.json]
+    [--json] [--config path.json]
+    "<task>" may be - to read the task from stdin (long/multiline tasks).
+    --json: stdout carries one machine-readable JSON document (result, rounds,
+    usage); human progress goes to stderr. Every completed run appends one
+    line to usage.jsonl (repo root).
     [--builder-engine <name>] [--builder-model X]
     [--reviewer-engine <name>] [--reviewer-model X]
     Precedence: built-in defaults < --config file < individual CLI flags.
@@ -156,6 +163,33 @@ const USAGE = `Usage:
     directional, not statistically significant — raise --repeat for confidence.
     Task graders: { "type": "includes"|"regex"|"judge", ... } (see README).`;
 
+// One appended line per completed run (bench arms included) — a local usage
+// history. Never fatal: a log write failure must not eat a successful run.
+function logRun(task: string, result: RunResult, builder: EngineConfig, reviewer: EngineConfig, consults: number): void {
+  const t = tallyTokens(result);
+  const line = {
+    ts: new Date().toISOString(),
+    task: task.length > 80 ? `${task.slice(0, 80)}…` : task,
+    mode: result.mode,
+    builder: `${builder.engine}/${builder.model}`,
+    reviewer: result.mode === 'baseline' ? null : `${reviewer.engine}/${reviewer.model}`,
+    consults,
+    rounds: result.rounds.length,
+    approvedEarly: result.rounds.at(-1)?.approved ?? false,
+    flagged: result.rounds.some((r) => r.flagged),
+    inputTokens: t.inputTokens,
+    outputTokens: t.outputTokens,
+    cacheReadTokens: t.cacheReadTokens,
+    cacheCreationTokens: t.cacheCreationTokens,
+    notionalCostUsd: t.notionalCost,
+  };
+  try {
+    appendFileSync(LOG_PATH, `${JSON.stringify(line)}\n`);
+  } catch (err) {
+    console.error(`  · usage log write failed (${err instanceof Error ? err.message : String(err)})`);
+  }
+}
+
 async function runOne(
   task: string,
   mode: Mode,
@@ -163,6 +197,7 @@ async function runOne(
   reviewer: EngineConfig,
   consults: number,
   verifier?: (output: string) => Promise<{ passed: boolean; feedback: string }>,
+  json = false,
 ): Promise<RunResult> {
   const builderLabel = `builder: ${builder.engine}/${builder.model}`;
   const label =
@@ -174,9 +209,15 @@ async function runOne(
           ? `${builderLabel} -- escalation reviewer: ${reviewer.engine}/${reviewer.model} [self-review each round, escalates at most once]`
           : `${builderLabel} -- reviewer: ${reviewer.engine}/${reviewer.model}` +
             (reviewer.engine === builder.engine && reviewer.model === builder.model ? ' [same model — self-review]' : '');
-  console.log(label);
+  // in --json mode stdout carries ONLY the JSON document; humans read stderr
+  (json ? console.error : console.log)(label);
 
   const result = await run({ task, builder, reviewer, consults, mode, verifier });
+  logRun(task, result, builder, reviewer, consults);
+  if (json) {
+    console.log(JSON.stringify({ ...result, usage: tallyTokens(result) }));
+    return result;
+  }
   console.log('\n--- final output ---');
   console.log(result.finalOutput);
   console.log('\n--- usage ---');
@@ -187,6 +228,11 @@ async function runOne(
 async function main() {
   const { flags, positional } = parseArgs(process.argv);
   const command = positional[0];
+
+  if (flags.help === true || command === 'help') {
+    console.log(USAGE);
+    return;
+  }
 
   if (command === 'providers') {
     const results = await detectAll();
@@ -242,7 +288,10 @@ async function main() {
   }
 
   if (command === 'run') {
-    const task = positional[1];
+    let task = positional[1];
+    if (task === '-') {
+      task = readFileSync(0, 'utf8').trim(); // fd 0 = stdin, for long/multiline tasks
+    }
     if (!task) {
       console.error(USAGE);
       process.exit(1);
@@ -284,7 +333,7 @@ async function main() {
       const builder = await resolveDecision(rl, 'builder', plan.builder, detected);
       const reviewer =
         plan.reviewer.kind === 'mirror' ? builder : await resolveDecision(rl, 'reviewer', plan.reviewer, detected);
-      await runOne(task, mode, builder, reviewer, consults);
+      await runOne(task, mode, builder, reviewer, consults, undefined, flags.json === true);
     } finally {
       rl?.close();
     }
