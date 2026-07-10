@@ -1,0 +1,22 @@
+[
+  {
+    "id": "constraint-no-e",
+    "prompt": "Write ONE grammatical English sentence of at least eight words that does not contain the letter e (uppercase or lowercase). Output only the sentence, nothing else.",
+    "grader": { "type": "regex", "pattern": "^\\s*([^\\seE]+\\s+){7,}[^\\seE]+\\s*$" }
+  },
+  {
+    "id": "constraint-seven-words",
+    "prompt": "Write a sentence about the ocean that is exactly seven words long. Output only the sentence.",
+    "grader": { "type": "regex", "pattern": "^\\W*([\\w'-]+\\W+){6}[\\w'-]+\\W*$" }
+  },
+  {
+    "id": "constraint-acrostic-loupe",
+    "prompt": "Write a five-line poem where the lines start with the letters L, O, U, P, E in that order (an acrostic of LOUPE). Output only the five lines.",
+    "grader": { "type": "regex", "pattern": "^\\s*L[^\\n]*\\n+O[^\\n]*\\n+U[^\\n]*\\n+P[^\\n]*\\n+E[^\\n]*\\s*$" }
+  },
+  {
+    "id": "constraint-json-only",
+    "prompt": "Output only a single JSON object (no prose, no code fence) with exactly two keys: \"name\" (a fictional person's name, a string) and \"age\" (an integer between 20 and 60).",
+    "grader": { "type": "regex", "pattern": "^\\s*\\{[^{}]*\"name\"\\s*:\\s*\"[^\"]+\"[^{}]*\"age\"\\s*:\\s*(2[0-9]|[3-5][0-9]|60)[^{}]*\\}\\s*$" }
+  }
+]

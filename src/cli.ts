@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { run, MODES, type Mode, type RunResult } from './runner.js';
@@ -152,6 +152,8 @@ const USAGE = `Usage:
     List detected providers — which engines are usable on this machine.
 
   tsx src/cli.ts bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json]
+    [--pack coding|reasoning|constraint] [--task <id>]
+    --pack <name> runs benchmark/packs/<name>.json; --task <id> runs one task.
     [--out results.json] [--fail-under 0.8]  (exit non-zero if best arm < bar — a CI gate)
     [--builder-engine X] [--builder-model X] [--reviewer-engine X] [--reviewer-model X]
     [--judge-engine X] [--judge-model X]   (judge scores "judge" graders; make it
@@ -343,8 +345,30 @@ async function main() {
   if (command === 'bench') {
     const consults = intFlag(flags, 'consults', 2);
     const repeat = intFlag(flags, 'repeat', 1);
-    const tasksPath = typeof flags.tasks === 'string' ? flags.tasks : join(here, '..', 'benchmark', 'tasks.json');
-    const tasks = JSON.parse(readFileSync(tasksPath, 'utf8')) as Array<{ id: string; prompt: string; grader?: Grader }>;
+    const packsDir = join(here, '..', 'benchmark', 'packs');
+    if (typeof flags.pack === 'string' && typeof flags.tasks === 'string') {
+      console.error('Error: pass --pack or --tasks, not both.');
+      process.exit(1);
+    }
+    let tasksPath: string;
+    if (typeof flags.pack === 'string') {
+      tasksPath = join(packsDir, `${flags.pack}.json`);
+      if (!existsSync(tasksPath)) {
+        const available = readdirSync(packsDir).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''));
+        console.error(`Error: unknown pack "${flags.pack}". Available: ${available.join(', ')}`);
+        process.exit(1);
+      }
+    } else {
+      tasksPath = typeof flags.tasks === 'string' ? flags.tasks : join(here, '..', 'benchmark', 'tasks.json');
+    }
+    let tasks = JSON.parse(readFileSync(tasksPath, 'utf8')) as Array<{ id: string; prompt: string; grader?: Grader }>;
+    if (typeof flags.task === 'string') {
+      tasks = tasks.filter((t) => t.id === flags.task);
+      if (tasks.length === 0) {
+        console.error(`Error: no task with id "${flags.task}" in ${tasksPath}`);
+        process.exit(1);
+      }
+    }
 
     console.log(
       `Running ${tasks.length} task(s) x ${repeat} repeat(s) x up to 5 arms (baseline / self-review / advised / escalated, + verify where an exec grader exists).\n` +

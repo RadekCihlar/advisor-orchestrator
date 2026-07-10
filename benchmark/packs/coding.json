@@ -1,0 +1,38 @@
+[
+  {
+    "id": "coding-parse-range",
+    "prompt": "Write a JavaScript function parseRange(s) that expands a range string like '1-3,5,7-9' into an array of integers [1,2,3,5,7,8,9]. Rules: comma-separated parts; each part is either a single integer or 'a-b' with a<=b; ignore spaces around parts; throw an Error on a malformed part (empty part, 'b-a' with b>a, or non-numeric). Output only the function.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if (JSON.stringify(parseRange('1-3,5,7-9')) !== '[1,2,3,5,7,8,9]') throw new Error(\"parseRange('1-3,5,7-9') wrong\");\nif (JSON.stringify(parseRange('4')) !== '[4]') throw new Error(\"parseRange('4') wrong\");\nif (JSON.stringify(parseRange(' 1 , 2-2 ')) !== '[1,2]') throw new Error('spaces not ignored');\nlet threw1 = false; try { parseRange('5-2'); } catch { threw1 = true; } if (!threw1) throw new Error('reversed range must throw');\nlet threw2 = false; try { parseRange('1,,2'); } catch { threw2 = true; } if (!threw2) throw new Error('empty part must throw');"
+    }
+  },
+  {
+    "id": "coding-balanced-brackets",
+    "prompt": "Write a JavaScript function isBalanced(s) that returns true when every ( ) [ ] { } in s is correctly matched and nested (other characters ignored), false otherwise. Output only the function.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if (isBalanced('a(b[c]{d})') !== true) throw new Error('nested mix should be true');\nif (isBalanced('([)]') !== false) throw new Error('interleaved should be false');\nif (isBalanced('') !== true) throw new Error('empty should be true');\nif (isBalanced(')(') !== false) throw new Error('close-first should be false');\nif (isBalanced('((') !== false) throw new Error('unclosed should be false');"
+    }
+  },
+  {
+    "id": "coding-luhn",
+    "prompt": "Write a JavaScript function luhnValid(s) that returns true when the digit string s passes the Luhn checksum, false otherwise. Non-digit characters or an empty string return false; a single digit is validated by the algorithm as-is. Output only the function.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if (luhnValid('79927398713') !== true) throw new Error('79927398713 is valid');\nif (luhnValid('79927398714') !== false) throw new Error('79927398714 is invalid');\nif (luhnValid('4539148803436467') !== true) throw new Error('4539148803436467 is valid');\nif (luhnValid('1234a') !== false) throw new Error('non-digits must be false');\nif (luhnValid('') !== false) throw new Error('empty must be false');"
+    }
+  },
+  {
+    "id": "coding-roman-to-int",
+    "prompt": "Write a JavaScript function romanToInt(s) converting a valid Roman numeral (I,V,X,L,C,D,M with subtractive notation) to an integer. Output only the function.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if (romanToInt('III') !== 3) throw new Error('III wrong');\nif (romanToInt('LVIII') !== 58) throw new Error('LVIII wrong');\nif (romanToInt('MCMXCIV') !== 1994) throw new Error('MCMXCIV wrong');\nif (romanToInt('IX') !== 9) throw new Error('IX wrong');"
+    }
+  }
+]

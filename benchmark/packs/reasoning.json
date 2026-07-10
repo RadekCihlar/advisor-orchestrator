@@ -1,0 +1,22 @@
+[
+  {
+    "id": "reasoning-prime-3599",
+    "prompt": "Is 3599 prime? If composite, give its prime factorization. Explain briefly, then end your reply with exactly 'ANSWER: prime' or 'ANSWER: composite'.",
+    "grader": { "type": "includes", "must": ["59", "61", "ANSWER: composite"], "caseInsensitive": true }
+  },
+  {
+    "id": "reasoning-book-bookmark",
+    "prompt": "A book and a bookmark cost $2.20 in total. The book costs exactly $2.00 more than the bookmark. How much does the bookmark cost? Show your reasoning briefly, then end your reply with exactly 'ANSWER: <number> cents'.",
+    "grader": { "type": "regex", "pattern": "ANSWER:\\s*10(\\.0+)?\\s*cents", "flags": "i" }
+  },
+  {
+    "id": "reasoning-age-puzzle",
+    "prompt": "Anna is 25 now. In 5 years, Anna will be exactly twice as old as Ben was 3 years ago. How old is Ben now? Show your reasoning briefly, then end your reply with exactly 'ANSWER: <number>'.",
+    "grader": { "type": "regex", "pattern": "ANSWER:\\s*18\\b" }
+  },
+  {
+    "id": "reasoning-letter-count",
+    "prompt": "How many times does the letter 'r' appear in the phrase 'strawberry raspberry'? Count carefully, then end your reply with exactly 'ANSWER: <number>'.",
+    "grader": { "type": "regex", "pattern": "ANSWER:\\s*6\\b" }
+  }
+]
