@@ -31,7 +31,9 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
    and appended `★ Insight` prose that broke the `exec` grader and polluted
    benchmarks. Fixed with `--setting-sources project,local` so the builder runs
    vanilla; verified no `★` across live runs (design §23). `extractCode` stays as
-   a light safety net for ordinary markdown fences.
+   a light safety net for ordinary markdown fences. The hook channel is closed
+   too: every call also passes `--settings` with `{"disableAllHooks":true}` —
+   measured in=3638→2 tokens, ~15x notional cost on a trivial prompt (design §24).
 
 3. **Real task packs with `exec` graders** `[useful]` · M — the eval is only as
    good as its tasks. Ship `benchmark/packs/{coding,reasoning,constraint}.json`

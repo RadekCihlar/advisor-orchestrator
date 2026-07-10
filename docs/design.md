@@ -538,3 +538,23 @@ surfaces the thrown assertion message rather than the stack-trace tail.
 Verified: no `★` across repeated live runs through the engine; 49/49 unit tests
 and `tsc --noEmit` still green. This closes ROADMAP item #2 — the top correctness
 lever.
+
+## 24. Hooks-tax fix ported + live consult visibility (2026-07-09)
+
+Two pieces ported from a parallel local session (rest of that work parked in `git stash@{0}` on the dev machine):
+
+**ROADMAP #2, the hook channel, with the measurement it asked for.** User-level SessionStart hooks inject their instructions as UNCACHED input into every headless `claude -p` call — both a token tax and the source of style contamination (the hook text on the dev machine literally instructs terse/caveman prose). Controlled experiment, same trivial prompt, sonnet, `--tools ""`:
+
+| config | input | cache_new | notional $ |
+|---|---|---|---|
+| defaults (project dir) | 3,638 | 12,315 | $0.0862 |
+| empty cwd | 3,638 | 11,857 | $0.0834 |
+| `--settings {"disableAllHooks":true}` | **2** | 0 | **$0.0055** |
+
+Fix shipped in `src/engines/claude-code.ts`: every call passes `--settings <tmpfile>` with `{"disableAllHooks": true}` (a file, not inline JSON, so the `.cmd` shell fallback can't mangle quotes). Empty-cwd isolation rejected (~2%). Remaining #2 work: a user-configured *output style* may leak through a different channel than hooks — measure contamination rate before/after per the roadmap.
+
+**Live consult visibility.** The runner now narrates to stderr as it happens — builder pass (tokens), reviewer consult, verdict/critique first line, escalation events, verify pass/fail. stdout stays clean for piping. Explicit user requirement: seeing WHEN the advising happens, not just end-of-run totals.
+
+Both verified: 49/49 unit tests green (stderr notes don't touch assertions), live smoke run on a local model shows the narration. Typecheck not run this session — npm registry (corporate Nexus) unreachable from the dev machine's network, so devDependencies couldn't install; CI covers it on push.
+
+*(Merge note 2026-07-10: this entry and §23 landed from two parallel sessions solving the two halves of ROADMAP #2 — §23 closed the output-style channel with `--setting-sources project,local`, this one closed the hook channel with `disableAllHooks`. The engine now passes both flags.)*

@@ -64,6 +64,19 @@ Graders per task:
 - `judge` — an LLM scores against a rubric (use an independent `--judge-engine` to avoid self-bias).
 - `exec` — run the code against tests. Ground truth, no LLM-judge confound. Any task with an `exec` grader also gets a **`verify`** arm.
 
+## Claude Code plugin
+
+This repo doubles as a Claude Code plugin: a SessionStart hook teaches every
+session to delegate write-then-judge asks ("have opus write it, let ollama
+judge it", "second opinion from a cheaper model") to the loupe CLI instead of
+hand-rolling API calls — and to report rounds, verdicts, and tokens back.
+`/loupe` carries the full recipe table.
+
+```sh
+claude plugin marketplace add <path-or-git-url-of-this-repo>
+claude plugin install loupe@loupe
+```
+
 ## Develop
 
 ```sh

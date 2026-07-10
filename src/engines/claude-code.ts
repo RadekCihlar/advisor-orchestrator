@@ -22,9 +22,26 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { CallResult, DetectResult, Engine } from './types.js';
 
 const execFileAsync = promisify(execFile);
+
+// Ambient-contamination fix (ROADMAP #2), measured live 2026-07-09: user-level
+// SessionStart hooks inject their instructions as UNCACHED input tokens into
+// every headless call — on this machine ~3.6k tokens/call of style rules that
+// both cost real tokens and steer the builder/reviewer's prose (the exact
+// contamination extractCode band-aids around). Same trivial prompt, sonnet:
+//   defaults:            in=3638  cache_new=12315  cost=$0.0862
+//   disableAllHooks:     in=2     cache_new=0      cost=$0.0055   (~15x)
+// (Empty-cwd isolation was also tested: ~2% difference, rejected.) Passed as a
+// settings FILE, not inline JSON, so the .cmd shell:true fallback can't mangle
+// the quotes. Note: this kills hook-injected style; a user-configured output
+// style may still leak through other channels — measure per ROADMAP #2.
+const SETTINGS_PATH = join(tmpdir(), 'loupe-claude-settings.json');
+writeFileSync(SETTINGS_PATH, '{"disableAllHooks": true}');
 
 // CallResult is the shared shape in ./types.ts. claude reports the fullest
 // usage of any engine: both cacheReadTokens (discounted reuse) and
@@ -77,8 +94,10 @@ export async function callClaudeCode(model: string, prompt: string): Promise<Cal
       // (notably the output style) so the spawned model runs vanilla. Without it,
       // an "Explanatory"-styled caller makes the builder append `★ Insight` prose
       // that pollutes benchmarks and breaks the exec grader. Deterministic fix at
-      // the source — beats hoping a prompt instruction is obeyed.
-      ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', '', '--setting-sources', 'project,local'],
+      // the source — beats hoping a prompt instruction is obeyed. --settings
+      // SETTINGS_PATH closes the complementary hook channel (see above) —
+      // project/local hooks would still fire without it.
+      ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', '', '--setting-sources', 'project,local', '--settings', SETTINGS_PATH],
       // ponytail: execFile leaves stdin open, so headless mode prints a ~3s
       // "no stdin data" warning then proceeds. Truly closing stdin needs
       // spawn + stdin.end(); not worth the rewrite for a cosmetic warning.

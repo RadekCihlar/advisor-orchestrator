@@ -6,3 +6,4 @@ dist/
 loupe.config.json
 advisor.config.json
 results.json
+usage.jsonl

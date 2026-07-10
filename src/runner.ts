@@ -60,6 +60,17 @@ export interface RunResult {
 
 const isApproval = (text: string): boolean => text.trim().toUpperCase().startsWith('APPROVED');
 
+// Live progress goes to stderr so stdout stays clean (final output only) for
+// piping/scripting — the user sees WHEN each consult happens and what the
+// reviewer said, not just end-of-run totals.
+const note = (msg: string): void => console.error(`  · ${msg}`);
+const id = (c: EngineConfig) => `${c.engine}/${c.model}`;
+const tok = (r: CallResult) => (r.usage ? `${r.usage.inputTokens} in / ${r.usage.outputTokens} out` : 'no token count');
+const firstLineOf = (text: string, max = 100) => {
+  const line = text.trim().split('\n')[0] ?? '';
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+};
+
 const reviewerPromptFor = (task: string, output: string): string =>
   `You are reviewing another AI's work.\n\nTask: ${task}\n\nIts output:\n${output}\n\nGive a short, specific critique of concrete problems only. If it is already correct and complete, respond with exactly "APPROVED" and nothing else.`;
 
@@ -85,6 +96,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
     // caller (cli.ts bench loop) catches per-arm and moves to the next one.
     const builderResult = await callFn(opts.builder, builderPrompt);
     builderOutput = builderResult.text;
+    note(`round ${round}: builder ${id(opts.builder)} — ${tok(builderResult)}`);
 
     const isLastRound = round === maxConsults;
     let reviewerResult: CallResult | null = null;
@@ -102,6 +114,11 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
           verify = await opts.verifier(builderOutput);
           approved = verify.passed;
           if (!verify.passed) feedback = verify.feedback;
+          note(
+            verify.passed
+              ? `round ${round}: verify PASSED — stopping`
+              : `round ${round}: verify failed: "${firstLineOf(verify.feedback)}"`,
+          );
         } else {
           approved = true; // verify mode but no verifier wired — nothing to check
         }
@@ -110,6 +127,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
         // Cheap self-review first (builder critiques itself — cache stays warm).
         // A failed self-review isn't swallowed: it falls through to escalation,
         // i.e. it's treated as "self couldn't clear it, phone the big reviewer".
+        note(`round ${round}: self-review by ${id(opts.builder)}…`);
         try {
           selfReview = await callFn(opts.builder, prompt);
         } catch {
@@ -120,38 +138,54 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
         if (selfApproved) {
           approved = true;
           feedback = selfReview!.text;
+          note(`round ${round}: self-review APPROVED — stopping early`);
         } else if (!hasEscalated) {
           // First time self-review isn't satisfied → spend the one escalation.
+          note(`round ${round}: self-review not satisfied — ESCALATING to ${id(opts.reviewer)} (once per run)…`);
           try {
             reviewerResult = await callFn(opts.reviewer, prompt);
             feedback = reviewerResult.text;
             approved = isApproval(feedback);
             escalated = true;
             hasEscalated = true;
+            note(
+              approved
+                ? `round ${round}: escalation reviewer APPROVED — stopping early`
+                : `round ${round}: escalation critique: "${firstLineOf(feedback)}"`,
+            );
           } catch (err) {
             reviewerError = err instanceof Error ? err.message : String(err);
             approved = true; // ship builder output without review
+            note(`round ${round}: escalation reviewer FAILED (${reviewerError}) — shipping without review`);
           }
         } else {
           // Escalation already spent this run — keep iterating on cheap
           // self-review feedback until self approves or we hit the last round.
           if (selfReview !== null) feedback = selfReview.text;
           approved = false;
+          note(`round ${round}: escalation already spent — iterating on self-review critique`);
         }
       } else {
         // advised / self-review: a single reviewer call every non-last round.
         // (self-review is just this with reviewer config == builder config.)
         const prompt = reviewerPromptFor(opts.task, builderOutput);
+        note(`round ${round}: consulting reviewer ${id(opts.reviewer)}…`);
         try {
           reviewerResult = await callFn(opts.reviewer, prompt);
           feedback = reviewerResult.text;
           approved = isApproval(feedback);
+          note(
+            approved
+              ? `round ${round}: reviewer APPROVED — stopping early`
+              : `round ${round}: reviewer critique: "${firstLineOf(feedback)}"`,
+          );
         } catch (err) {
           // Reviewer failed (rate limit, upstream error, ...) but the builder
           // pass this round already succeeded — ship it without review instead
           // of throwing away a valid result.
           reviewerError = err instanceof Error ? err.message : String(err);
           approved = true;
+          note(`round ${round}: reviewer FAILED (${reviewerError}) — shipping builder output without review`);
         }
       }
     }
