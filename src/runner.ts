@@ -47,6 +47,7 @@ export interface ConsultRound {
   // deciding whether to spend a call on the bigger reviewer. Counted in usage.
   selfReview?: CallResult | null;
   approved: boolean;
+  flagged?: boolean; // builder emitted the uncertainty marker this round
   escalated?: boolean; // true if the bigger reviewer was invoked this round
   verify?: { passed: boolean; feedback: string }; // verify mode: the programmatic check's result
   reviewerError?: string;
@@ -64,6 +65,18 @@ export const isApproval = (text: string): boolean => {
   const firstLine = text.trim().split('\n')[0] ?? '';
   return firstLine.replace(/^["'`*\s]+|["'`*\s.!]+$/g, '').toUpperCase() === 'APPROVED';
 };
+
+// ROADMAP #11 / design §9: the builder appends this marker when genuinely
+// unsure. Escalated mode reads it as "don't trust my self-review" and spends
+// its one big-reviewer escalation immediately instead of self-reviewing first.
+export const UNCERTAINTY_MARKER = '<<needs-review>>';
+
+export function stripMarker(text: string): { text: string; flagged: boolean } {
+  if (!text.includes(UNCERTAINTY_MARKER)) return { text, flagged: false };
+  return { text: text.replaceAll(UNCERTAINTY_MARKER, '').trimEnd(), flagged: true };
+}
+
+const MARKER_INSTRUCTION = `\n\nIf you are genuinely unsure your answer is correct or complete, append the exact marker ${UNCERTAINTY_MARKER} as the last line of your reply.`;
 
 // Live progress goes to stderr so stdout stays clean (final output only) for
 // piping/scripting — the user sees WHEN each consult happens and what the
@@ -91,16 +104,18 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
   let hasEscalated = false; // escalated mode: the bigger reviewer fires at most once per run
 
   for (let round = 0; round <= maxConsults; round++) {
+    const marker = opts.mode === 'escalated' ? MARKER_INSTRUCTION : '';
     const builderPrompt =
       round === 0
-        ? `Task: ${opts.task}`
-        : `Task: ${opts.task}\n\nYour previous attempt:\n${builderOutput}\n\nReviewer feedback:\n${feedback}\n\nRevise your attempt accordingly. Output only the revised attempt.`;
+        ? `Task: ${opts.task}${marker}`
+        : `Task: ${opts.task}\n\nYour previous attempt:\n${builderOutput}\n\nReviewer feedback:\n${feedback}\n\nRevise your attempt accordingly. Output only the revised attempt.${marker}`;
 
     // Builder failures propagate uncaught: with no builder pass this round,
     // there's nothing to ship, so the whole run legitimately fails here. The
     // caller (cli.ts bench loop) catches per-arm and moves to the next one.
     const builderResult = await callFn(opts.builder, builderPrompt);
-    builderOutput = builderResult.text;
+    const stripped = stripMarker(builderResult.text);
+    builderOutput = stripped.text;
     note(`round ${round}: builder ${id(opts.builder)} — ${tok(builderResult)}`);
 
     const isLastRound = round === maxConsults;
@@ -129,16 +144,21 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
         }
       } else if (opts.mode === 'escalated') {
         const prompt = reviewerPromptFor(opts.task, builderOutput);
-        // Cheap self-review first (builder critiques itself — cache stays warm).
-        // A failed self-review isn't swallowed: it falls through to escalation,
-        // i.e. it's treated as "self couldn't clear it, phone the big reviewer".
-        note(`round ${round}: self-review by ${id(opts.builder)}…`);
-        try {
-          selfReview = await callFn(opts.builder, prompt);
-        } catch {
-          selfReview = null;
+        let selfApproved = false;
+        if (stripped.flagged && !hasEscalated) {
+          note(`round ${round}: builder flagged ${UNCERTAINTY_MARKER} — skipping self-review, escalating directly`);
+        } else {
+          // Cheap self-review first (builder critiques itself — cache stays warm).
+          // A failed self-review isn't swallowed: it falls through to escalation,
+          // i.e. it's treated as "self couldn't clear it, phone the big reviewer".
+          note(`round ${round}: self-review by ${id(opts.builder)}…`);
+          try {
+            selfReview = await callFn(opts.builder, prompt);
+          } catch {
+            selfReview = null;
+          }
+          selfApproved = selfReview !== null && isApproval(selfReview.text);
         }
-        const selfApproved = selfReview !== null && isApproval(selfReview.text);
 
         if (selfApproved) {
           approved = true;
@@ -195,7 +215,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
       }
     }
 
-    rounds.push({ round, builder: builderResult, reviewer: reviewerResult, selfReview, approved, escalated, verify, reviewerError });
+    rounds.push({ round, builder: builderResult, reviewer: reviewerResult, selfReview, approved, flagged: stripped.flagged, escalated, verify, reviewerError });
 
     if (approved) break; // reviewer satisfied — stop early, don't burn remaining consults
   }
