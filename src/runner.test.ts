@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run } from './runner.js';
+import { run, isApproval } from './runner.js';
 import type { EngineConfig, CallResult } from './engines/index.js';
 
 // Injected fake engine — lets us test the loop's control flow (who gets
@@ -150,4 +150,12 @@ test('verify mode: verifier fails then passes → revises with feedback, no LLM 
   assert.match(builderPrompts[1], /test_foo failed/, 'verifier feedback must reach the builder');
   assert.ok(r.rounds.every((x) => x.reviewer === null), 'verify mode makes no LLM reviewer calls');
   assert.equal(r.rounds[0].verify?.passed, false);
+});
+
+test('isApproval: strict — bare APPROVED yes, "APPROVED, but…" no', () => {
+  assert.equal(isApproval('APPROVED'), true);
+  assert.equal(isApproval('  "Approved."  '), true);
+  assert.equal(isApproval('APPROVED\nno further notes'), true);
+  assert.equal(isApproval('APPROVED, but rename the variable'), false);
+  assert.equal(isApproval('Not approved'), false);
 });

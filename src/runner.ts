@@ -58,7 +58,12 @@ export interface RunResult {
   rounds: ConsultRound[];
 }
 
-const isApproval = (text: string): boolean => text.trim().toUpperCase().startsWith('APPROVED');
+// Strict verdict parse: the FIRST LINE, stripped of quotes/punctuation, must BE
+// "APPROVED" — "APPROVED, but fix X" is a critique, not an approval.
+export const isApproval = (text: string): boolean => {
+  const firstLine = text.trim().split('\n')[0] ?? '';
+  return firstLine.replace(/^["'`*\s]+|["'`*\s.!]+$/g, '').toUpperCase() === 'APPROVED';
+};
 
 // Live progress goes to stderr so stdout stays clean (final output only) for
 // piping/scripting — the user sees WHEN each consult happens and what the
