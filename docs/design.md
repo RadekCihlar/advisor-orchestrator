@@ -558,3 +558,49 @@ Fix shipped in `src/engines/claude-code.ts`: every call passes `--settings <tmpf
 Both verified: 49/49 unit tests green (stderr notes don't touch assertions), live smoke run on a local model shows the narration. Typecheck not run this session — npm registry (corporate Nexus) unreachable from the dev machine's network, so devDependencies couldn't install; CI covers it on push.
 
 *(Merge note 2026-07-10: this entry and §23 landed from two parallel sessions solving the two halves of ROADMAP #2 — §23 closed the output-style channel with `--setting-sources project,local`, this one closed the hook channel with `disableAllHooks`. The engine now passes both flags.)*
+
+---
+
+## 25. Roadmap batch: stash triage, packs, per-assertion scoring, stddev (2026-07-10)
+
+**Stash@{1} triage.** The 2026-07-09 parked WIP predated the multi-provider
+rebrand, so most of it was already superseded upstream (its `escalate` mode →
+`escalated`, its `checks` arrays → the grader system, its cacheCreation
+tracking and stderr narration → already landed). Ported the survivors into the
+current codebase instead of applying the stash: strict `isApproval` (first
+line must BE "APPROVED" — "APPROVED, but…" is a critique), the `<<needs-review>>`
+uncertainty marker (ROADMAP #11: escalated-mode builders append it when unsure;
+a flagged round skips self-review and fires the one escalation immediately),
+`--json` + stdin `-` on `run`, a per-run `usage.jsonl` append (never fatal),
+npm-shim `.exe` resolution for claude outside a session, and one blind 3s retry
+per engine call (covers transient 429/5xx that used to cost a whole bench arm).
+
+**ROADMAP #4 — per-assertion exec scoring.** The exec grader no longer
+concatenates code+tests and reads the exit code. Each non-empty line of `tests`
+is one self-contained check; a generated harness (python/node) runs them
+individually, prints `LOUPE_SCORE passed/total` + up to 3 `LOUPE_FAIL <line ->
+error>` lines, and always exits 0. Score is the passing fraction; the failing
+lines are the detail — which is exactly what `verify` mode feeds back to the
+builder, so targeted feedback came free. Code that crashes at load still hits
+the old exit-code path (score 0, stderr's useful line surfaced). Contract
+change: multi-line setup inside `tests` is no longer supported — one statement
+per line.
+
+**ROADMAP #3 — task packs.** `benchmark/packs/{coding,reasoning,constraint}.json`,
+run via `bench --pack <name> [--task <id>]`. All graders deterministic (regex /
+includes / exec-node — no judge cost, and node not python so Windows dev
+machines can grade). The honesty mechanism is `src/packs.test.ts`: every pack
+task's grader must score a known-good reference solution 1.0 and a known-bad
+one <1, offline. A "hard" task with a broken grader can't hide.
+
+**ROADMAP #7 — statistical rigor.** `ArmStats.stddevScore` = sample stddev
+(n−1), null under 2 graded runs; the report table shows `mean ±stddev` (min-max
+range stays in the JSON) and prints a small-n warning when any graded arm has
+n<5. Deliberately no confidence intervals at this scale — stddev + n is enough
+to stop n=1–3 from reading as signal.
+
+Verified: 77/77 unit tests via `npx tsx --test`; live smoke of `run - --json`
+(stdin task, single JSON doc on stdout, narration on stderr, usage.jsonl line
+appended, in=2 tokens confirming the §23+§24 combined contamination fix works
+through the engine). `tsc` still can't run on this machine (Nexus) — CI gates
+typecheck on push.

@@ -35,14 +35,17 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
    too: every call also passes `--settings` with `{"disableAllHooks":true}` —
    measured in=3638→2 tokens, ~15x notional cost on a trivial prompt (design §24).
 
-3. **Real task packs with `exec` graders** `[useful]` · M — the eval is only as
-   good as its tasks. Ship `benchmark/packs/{coding,reasoning,constraint}.json`
-   with ground-truth tests, so `loupe bench --pack coding` works out of the box
-   and actually has headroom (not tasks strong models already ace).
+3. ✅ **DONE — real task packs** `[useful]` — shipped
+   `benchmark/packs/{coding,reasoning,constraint}.json`, all deterministic
+   graders (no judge cost), run via `bench --pack <name> [--task <id>]`. Every
+   pack task's grader is proven against a reference solution in
+   `src/packs.test.ts` — a failing grader is caught offline, keeping "headroom"
+   honest (design §25).
 
-4. **Per-assertion `exec` scoring + targeted feedback** `[better]` · M — score =
-   fraction of checks passing (not binary); in `verify`, feed the *specific*
-   failing assertion back to the builder. Richer signal, better fix loop.
+4. ✅ **DONE — per-assertion `exec` scoring** `[better]` — each non-empty line
+   of `tests` runs as an independent check (LOUPE_SCORE harness); score =
+   fraction passing, and the *specific* failing assertions (with errors) are
+   the detail that `verify` mode feeds back to the builder (design §25).
 
 ## Next
 
@@ -54,9 +57,9 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
    `loupe run` instead of `npx tsx src/cli.ts`. Add a `bin` + a build/bundle step
    so `npm i -g loupe` / `npx loupe` works.
 
-7. **Statistical rigor** `[better]` · S — repeats + mean±stddev / CI in the report
-   and JSON; flag when n is too small to conclude. Stops n=1–3 from reading as
-   signal.
+7. ✅ **DONE — statistical rigor** `[better]` — report shows mean ±stddev
+   (sample, n−1) per arm, warns when any graded arm has n<5; stddev rides the
+   `--out` JSON via `ArmStats.stddevScore` (design §25).
 
 8. **Results history + diff** `[useful]` · M — `loupe diff a.json b.json`: did my
    prompt/model change help? Timestamped result store.
@@ -68,8 +71,10 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
 
 10. **Parallel bench** (bounded concurrency) `[better]` · S — wall-clock; bench is
     sequential today.
-11. **§9 self-uncertainty marker** (`<<needs-review>>`) `[better]` · M — builder
-    flags its own uncertainty to trigger review out of schedule.
+11. ✅ **DONE — §9 self-uncertainty marker** (`<<needs-review>>`) `[better]` —
+    escalated-mode builders are invited to append the marker when unsure; a
+    flagged round skips the self-review and spends the one escalation
+    immediately. Flag rate is visible per run in usage.jsonl (design §25).
 12. **Unwired config knobs from the design** `[better]` · M — `frequency:
     on-low-confidence`, `consult_context: full-history`, `token_budget`/`saver`.
     Build each only when a workload needs it (YAGNI).

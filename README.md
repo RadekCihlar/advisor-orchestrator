@@ -34,6 +34,11 @@ npx tsx src/cli.ts setup            # detect providers, pick + verify, write lou
 npx tsx src/cli.ts run "your task"  # auto-loads loupe.config.json — no flags needed
 ```
 
+`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks);
+`--json` puts one machine-readable JSON document on stdout (result, rounds,
+usage) with the human narration on stderr. Every completed run appends a line
+to `usage.jsonl` — a local run history.
+
 `setup` finds what's usable (Claude Code / Codex / Ollama), lets you pick the builder + reviewer, does a live test call to confirm, and saves it. After that, `run` and `bench` just work.
 
 ## Modes
@@ -53,16 +58,25 @@ npx tsx src/cli.ts run "your task"  # auto-loads loupe.config.json — no flags 
 ## Benchmark + verdict
 
 ```sh
-npx tsx src/cli.ts bench --tasks ./my-tasks.json --repeat 5 --out results.json --fail-under 0.8
+npx tsx src/cli.ts bench --pack coding --repeat 5 --out results.json --fail-under 0.8
+npx tsx src/cli.ts bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one task
 ```
 
-Grades every arm, prints a quality×cost table + verdict, saves the full data to JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear your bar (a CI quality gate).
+Grades every arm, prints a quality×cost table (mean ±stddev per arm, with a
+warning when n is too small to conclude) + verdict, saves the full data to
+JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear
+your bar (a CI quality gate).
+
+Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`,
+`constraint` — all deterministic graders, each proven against a reference
+solution in `src/packs.test.ts`. Point `--tasks` at your own workload to learn
+which mode wins for *it*.
 
 Graders per task:
 
 - `includes` / `regex` — deterministic checks for known answers or hard constraints.
 - `judge` — an LLM scores against a rubric (use an independent `--judge-engine` to avoid self-bias).
-- `exec` — run the code against tests. Ground truth, no LLM-judge confound. Any task with an `exec` grader also gets a **`verify`** arm.
+- `exec` — run the code against tests. Ground truth, no LLM-judge confound. Any task with an `exec` grader also gets a **`verify`** arm. Each non-empty line of `tests` is one self-contained check: score = fraction passing, and the failing lines are the feedback `verify` mode sends back to the builder.
 
 ## Claude Code plugin
 
@@ -94,7 +108,7 @@ npm run typecheck   # tsc --noEmit
 
 ## Status & honest limits
 
-Works end-to-end, verified live: multi-provider, exec grading, the verify loop, real error handling, reproducible verdicts, 49 unit tests + a clean typecheck. Known limits: `judge` grading needs an independent model to avoid self-enhancement bias; the `codex` engine is written to the published spec but not yet run against an installed codex; direct-API (key-based) engines are a designed extension point, not built. Full design + build history: [`docs/design.md`](docs/design.md).
+Works end-to-end, verified live: multi-provider, per-assertion exec grading, the verify loop, real error handling, reproducible verdicts, 77 unit tests + a clean typecheck. Known limits: `judge` grading needs an independent model to avoid self-enhancement bias; the `codex` engine is written to the published spec but not yet run against an installed codex; direct-API (key-based) engines are a designed extension point, not built. Full design + build history: [`docs/design.md`](docs/design.md).
 
 ## Roadmap
 
