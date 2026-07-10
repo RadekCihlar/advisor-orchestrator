@@ -70,3 +70,26 @@ test('reportJson bundles meta + stats + records and round-trips through JSON', (
   assert.ok(j.stats.some((s) => s.mode === 'advised'));
   assert.deepEqual(JSON.parse(JSON.stringify(j)).meta, j.meta); // serializable
 });
+
+test('aggregate: stddevScore is the sample stddev; null under 2 graded runs', () => {
+  const recs = [
+    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+    { taskId: 't', mode: 'baseline', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+  ];
+  const stats = aggregate(recs);
+  const advised = stats.find((s) => s.mode === 'advised')!;
+  const baseline = stats.find((s) => s.mode === 'baseline')!;
+  assert.ok(Math.abs(advised.stddevScore! - 0.35355) < 1e-4);
+  assert.equal(baseline.stddevScore, null);
+});
+
+test('formatReport: shows ±stddev and warns on small n', () => {
+  const recs = [
+    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+  ];
+  const out = formatReport(aggregate(recs));
+  assert.match(out, /±0\.35/);
+  assert.match(out, /small n/i);
+});

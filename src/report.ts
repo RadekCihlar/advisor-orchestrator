@@ -19,6 +19,9 @@ export interface ArmStats {
   gradedRuns: number;
   meanScore: number | null;
   scoreRange: [number, number] | null;
+  // Sample stddev (n-1) of graded scores; null when < 2 graded runs. What
+  // separates "advised is better" from "advised got lucky once" (ROADMAP #7).
+  stddevScore: number | null;
   meanInputTokens: number;
   meanOutputTokens: number;
   meanCacheReadTokens: number;
@@ -32,6 +35,12 @@ export interface ArmStats {
 }
 
 const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
+const sampleStddev = (xs: number[]): number | null => {
+  if (xs.length < 2) return null;
+  const m = mean(xs);
+  return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1));
+};
 
 export function aggregate(records: RunRecord[]): ArmStats[] {
   const byMode = new Map<string, RunRecord[]>();
@@ -49,6 +58,7 @@ export function aggregate(records: RunRecord[]): ArmStats[] {
       gradedRuns: scores.length,
       meanScore: scores.length ? mean(scores) : null,
       scoreRange: scores.length ? [Math.min(...scores), Math.max(...scores)] : null,
+      stddevScore: sampleStddev(scores),
       meanInputTokens: mean(rs.map((r) => r.inputTokens)),
       meanOutputTokens: mean(rs.map((r) => r.outputTokens)),
       meanCacheReadTokens: mean(rs.map((r) => r.cacheReadTokens)),
@@ -68,13 +78,19 @@ export function formatReport(stats: ArmStats[]): string {
   lines.push('=== quality × cost by arm ===');
   lines.push(`${'arm'.padEnd(12)} ${'runs'.padStart(4)} ${'score'.padStart(11)} ${'in'.padStart(8)} ${'out'.padStart(8)} ${'cacheRd'.padStart(9)} ${'cacheCr'.padStart(9)} ${'total'.padStart(9)}`);
   for (const s of stats) {
+    // mean ±stddev in the table; the min-max range stays in the JSON export
     const score =
       s.meanScore === null
         ? '—'
-        : `${s.meanScore.toFixed(2)}${s.scoreRange && s.scoreRange[0] !== s.scoreRange[1] ? ` [${s.scoreRange[0].toFixed(2)}-${s.scoreRange[1].toFixed(2)}]` : ''}`;
+        : `${s.meanScore.toFixed(2)}${s.stddevScore !== null ? ` ±${s.stddevScore.toFixed(2)}` : ''}`;
     lines.push(
       `${s.mode.padEnd(12)} ${String(s.runs).padStart(4)} ${score.padStart(11)} ${n0(s.meanInputTokens).padStart(8)} ${n0(s.meanOutputTokens).padStart(8)} ${n0(s.meanCacheReadTokens).padStart(9)} ${n0(s.meanCacheCreationTokens).padStart(9)} ${n0(s.meanTotalTokens).padStart(9)}`,
     );
+  }
+
+  const smallN = stats.filter((s) => s.gradedRuns > 0 && s.gradedRuns < 5);
+  if (smallN.length > 0) {
+    lines.push(`  (small n: ${smallN.map((s) => `${s.mode}=${s.gradedRuns}`).join(', ')} graded runs — directional only, raise --repeat for confidence)`);
   }
 
   lines.push('');
