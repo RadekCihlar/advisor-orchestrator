@@ -516,3 +516,25 @@ the local baseline is ~free — absolute opus cost was ~$0.15/advised run. Minor
 tech debt surfaced: the grader's failure *detail* prints the stack-trace tail
 instead of the thrown assertion message (the score is correct; the message is
 unhelpful).
+
+---
+
+## 23. Ambient contamination fixed at the source (2026-07-10)
+
+The recurring benchmark polluter — the spawned `claude-code` builder appending
+`★ Insight` prose (which broke the exec grader and produced false 0.00s all
+session) — traced to the builder inheriting the **caller's** user-global settings,
+including the output style. An "Explanatory"-styled caller styled the builder too.
+
+Fix (confirmed by experiment on us-east5 / sonnet-4-6): pass
+**`--setting-sources project,local`** so the spawned model loads only
+project/local settings, never the user-global output style — it runs vanilla. An
+`--append-system-prompt "no markdown"` attempt backfired (it *added* a code
+fence), so it was rejected. Ordinary markdown fences still appear sometimes and
+are fine — `extractCode` extracts them cleanly, so it's now a light safety net,
+not the primary defense. Also fixed this session: the grader's failure detail now
+surfaces the thrown assertion message rather than the stack-trace tail.
+
+Verified: no `★` across repeated live runs through the engine; 49/49 unit tests
+and `tsc --noEmit` still green. This closes ROADMAP item #2 — the top correctness
+lever.

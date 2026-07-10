@@ -73,7 +73,12 @@ export async function callClaudeCode(model: string, prompt: string): Promise<Cal
   try {
     const { stdout } = await execFileAsync(
       CLAUDE_BIN,
-      ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', ''],
+      // --setting-sources project,local drops the caller's USER-global settings
+      // (notably the output style) so the spawned model runs vanilla. Without it,
+      // an "Explanatory"-styled caller makes the builder append `★ Insight` prose
+      // that pollutes benchmarks and breaks the exec grader. Deterministic fix at
+      // the source — beats hoping a prompt instruction is obeyed.
+      ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', '', '--setting-sources', 'project,local'],
       // ponytail: execFile leaves stdin open, so headless mode prints a ~3s
       // "no stdin data" warning then proceeds. Truly closing stdin needs
       // spawn + stdin.end(); not worth the rewrite for a cosmetic warning.

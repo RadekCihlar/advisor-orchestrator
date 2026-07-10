@@ -26,13 +26,12 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
    `npm ci && npm run typecheck && npm test`. Locks in the green state. *(landed
    alongside this roadmap.)*
 
-2. **Neutralize ambient output-style contamination** `[better]` · M — the single
-   biggest correctness lever. The spawned `claude`/`codex` builder inherits the
-   caller's CLAUDE.md / output style and appends prose (`★ Insight`, backtick
-   notes) that breaks the `exec` grader and pollutes benchmarks. `extractCode` is
-   a band-aid. Fix at the source: find a minimal invocation that suppresses
-   ambient style **without** `--bare` (which breaks OAuth). Measure the
-   contamination rate before/after so the fix is provable.
+2. ✅ **DONE — neutralized ambient output-style contamination** `[better]` — the
+   spawned `claude-code` builder inherited the caller's user-global output style
+   and appended `★ Insight` prose that broke the `exec` grader and polluted
+   benchmarks. Fixed with `--setting-sources project,local` so the builder runs
+   vanilla; verified no `★` across live runs (design §23). `extractCode` stays as
+   a light safety net for ordinary markdown fences.
 
 3. **Real task packs with `exec` graders** `[useful]` · M — the eval is only as
    good as its tasks. Ship `benchmark/packs/{coding,reasoning,constraint}.json`
