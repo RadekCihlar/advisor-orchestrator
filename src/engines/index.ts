@@ -26,8 +26,22 @@ export function getEngine(name: string): Engine {
   return engine;
 }
 
+// One blind retry after a short delay — covers the transient 429/5xx blips
+// that used to cost a whole bench arm; a deterministic error (bad model name)
+// just fails once more. Real backoff only if this proves too crude.
+export async function retryOnce<T>(fn: () => Promise<T>, label: string, delayMs = 3000): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  · ${label} failed (${msg}) — retrying once in ${Math.round(delayMs / 1000)}s…`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return fn();
+  }
+}
+
 export async function call(cfg: EngineConfig, prompt: string): Promise<CallResult> {
-  return getEngine(cfg.engine).call(cfg.model, prompt);
+  return retryOnce(() => getEngine(cfg.engine).call(cfg.model, prompt), `call to ${cfg.engine}/${cfg.model}`);
 }
 
 // Runs every registered engine's detect() concurrently — backs the `providers` command

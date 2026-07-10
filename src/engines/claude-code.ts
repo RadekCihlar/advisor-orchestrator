@@ -22,7 +22,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CallResult, DetectResult, Engine } from './types.js';
@@ -49,14 +49,24 @@ writeFileSync(SETTINGS_PATH, '{"disableAllHooks": true}');
 // benchmark finding). notionalCostUsd is claude -p's own figure — a REAL
 // metered cost on Vertex/Bedrock, ~$0 on a Claude.ai subscription.
 
-// Prefer the real binary via CLAUDE_CODE_EXECPATH (set when running inside a
-// Claude Code session) — spawning it directly needs no shell, so Node's
-// normal argv escaping just works. Fallback (claude.cmd on Windows) requires
-// shell:true, which does NOT safely escape args (Node's own deprecation
-// warning says so) — multi-word prompts get mangled under that path. Prefer
-// the env var whenever it's present.
-const CLAUDE_BIN = process.env.CLAUDE_CODE_EXECPATH || (process.platform === 'win32' ? 'claude.cmd' : 'claude');
-const NEEDS_SHELL = process.platform === 'win32' && CLAUDE_BIN.toLowerCase().endsWith('.cmd');
+// Prefer a real binary spawned WITHOUT a shell, so Node's normal argv
+// escaping just works. Resolution order:
+// 1. CLAUDE_CODE_EXECPATH (set automatically inside a Claude Code session)
+// 2. the .exe behind the npm-global shim (standalone shells don't have the
+//    env var — this repo's whole point is running outside a session)
+// 3. last resort: the .cmd shim, which requires shell:true — that does NOT
+//    safely escape args (Node's own deprecation warning says so) and mangles
+//    multi-word prompts.
+function resolveClaudeBin(): { bin: string; needsShell: boolean } {
+  if (process.env.CLAUDE_CODE_EXECPATH) return { bin: process.env.CLAUDE_CODE_EXECPATH, needsShell: false };
+  if (process.platform === 'win32') {
+    const npmExe = join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+    if (existsSync(npmExe)) return { bin: npmExe, needsShell: false };
+    return { bin: 'claude.cmd', needsShell: true };
+  }
+  return { bin: 'claude', needsShell: false };
+}
+const { bin: CLAUDE_BIN, needsShell: NEEDS_SHELL } = resolveClaudeBin();
 
 // Turns claude -p's JSON stdout into a CallResult, or throws a DESCRIPTIVE
 // error when the payload reports failure. claude writes this same JSON to
