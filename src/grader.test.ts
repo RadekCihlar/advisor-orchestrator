@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { grade, gradeDeterministic, parseJudgeScore, extractCode } from './grader.js';
+import { grade, gradeDeterministic, parseJudgeScore, extractCode, splitChecks } from './grader.js';
 import type { EngineConfig, CallResult } from './engines/index.js';
 
 const mk = (text: string): CallResult => ({ text, usage: null, notionalCostUsd: null });
@@ -61,7 +61,7 @@ test('exec grader: passing checks → 1, failing → 0 (real node subprocess)', 
   assert.equal(pass.score, 1);
   const fail = await grade({ type: 'exec', language: 'node', tests: "if (add(2,3) !== 6) throw new Error('bad');" }, code);
   assert.equal(fail.score, 0);
-  assert.match(fail.detail, /checks failed/);
+  assert.match(fail.detail, /0\/1 checks passed/); // per-assertion harness reports counts, not a blanket failure
 });
 
 test('exec grader: extracts fenced code before running', async () => {
@@ -92,4 +92,29 @@ test('extractCode: strips trailing backtick-prose and plain explanatory sentence
 test('extractCode: keeps legitimate code (comments, JSDoc) intact', () => {
   const code = '// Returns one.\nfunction f() {\n  return 1;\n}';
   assert.equal(extractCode(code).trim(), code);
+});
+
+test('splitChecks: one check per non-empty line', () => {
+  assert.deepEqual(splitChecks("a();\n\n  b();  \n"), ['a();', 'b();']);
+});
+
+test('exec grader: per-assertion fractional score + failing check named in detail', async () => {
+  const code = 'function add(a, b) { return a === 2 ? a + b : 0; }';
+  const r = await grade(
+    {
+      type: 'exec',
+      language: 'node',
+      tests: "if (add(2,3) !== 5) throw new Error('add(2,3) wrong');\nif (add(4,4) !== 8) throw new Error('add(4,4) wrong');",
+    },
+    code,
+  );
+  assert.equal(r.score, 0.5);
+  assert.match(r.detail, /1\/2 checks passed/);
+  assert.match(r.detail, /add\(4,4\) wrong/, 'the failing check must be named for targeted feedback');
+});
+
+test('exec grader: code that crashes at load still scores 0 with the error surfaced', async () => {
+  const r = await grade({ type: 'exec', language: 'node', tests: 'f();' }, 'syntax error here((');
+  assert.equal(r.score, 0);
+  assert.match(r.detail, /checks failed|no score/);
 });

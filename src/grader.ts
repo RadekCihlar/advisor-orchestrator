@@ -83,6 +83,52 @@ export function extractCode(output: string): string {
   return (cut === -1 ? lines : lines.slice(0, cut)).join('\n');
 }
 
+// Per-assertion scoring (ROADMAP #4): one check per non-empty line of `tests`.
+// Each line must be a self-contained statement — the harness runs them
+// individually so one failure doesn't mask the rest, score = passed/total,
+// and the FAILING lines (not just "exit 1") become the verify-mode feedback.
+export function splitChecks(tests: string): string[] {
+  return tests
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function pythonHarness(code: string, checks: string[]): string {
+  const list = checks.map((c) => `    ${JSON.stringify(c)},`).join('\n');
+  return `${code}
+
+_checks = [
+${list}
+]
+_failures = []
+for _c in _checks:
+    try:
+        exec(_c, globals())
+    except Exception as _e:
+        _failures.append(f"{_c}  ->  {type(_e).__name__}: {_e}")
+print(f"LOUPE_SCORE {len(_checks) - len(_failures)}/{len(_checks)}")
+for _f in _failures[:3]:
+    print("LOUPE_FAIL " + _f)
+`;
+}
+
+function nodeHarness(code: string, checks: string[]): string {
+  const list = checks.map((c) => `  [${JSON.stringify(c)}, () => { ${c} }],`).join('\n');
+  return `${code}
+
+const _checks = [
+${list}
+];
+const _failures = [];
+for (const [_src, _fn] of _checks) {
+  try { _fn(); } catch (_e) { _failures.push(_src + '  ->  ' + (_e && _e.message ? _e.message : String(_e))); }
+}
+console.log('LOUPE_SCORE ' + (_checks.length - _failures.length) + '/' + _checks.length);
+for (const _f of _failures.slice(0, 3)) console.log('LOUPE_FAIL ' + _f);
+`;
+}
+
 // ponytail: runs UNTRUSTED model-generated code in a subprocess with a wall-clock
 // timeout in a throwaway temp dir. That's the pragmatic ceiling — it does NOT
 // sandbox filesystem / network / syscalls. For untrusted inputs at scale, run
@@ -93,8 +139,17 @@ async function runProgram(language: 'python' | 'node', program: string, timeoutM
   const dir = await mkdtemp(join(tmpdir(), 'loupe-exec-'));
   try {
     await writeFile(join(dir, filename), program);
-    await execFileAsync(interp, [join(dir, filename)], { timeout: timeoutMs, maxBuffer: 1024 * 1024 });
-    return { score: 1, detail: 'all checks passed' };
+    const { stdout } = await execFileAsync(interp, [join(dir, filename)], { timeout: timeoutMs, maxBuffer: 1024 * 1024 });
+    const m = String(stdout).match(/LOUPE_SCORE (\d+)\/(\d+)/);
+    if (!m) return { score: 0, detail: 'harness produced no score (program crashed before checks?)' };
+    const passed = Number(m[1]);
+    const total = Number(m[2]);
+    if (total === 0 || passed === total) return { score: 1, detail: 'all checks passed' };
+    const fails = [...String(stdout).matchAll(/^LOUPE_FAIL (.+)$/gm)].map((x) => x[1]);
+    return {
+      score: passed / total,
+      detail: `${passed}/${total} checks passed; failing: ${fails.join(' | ').slice(0, 300)}`,
+    };
   } catch (err) {
     const e = err as { code?: unknown; killed?: boolean; stderr?: string; message?: string };
     if (e.code === 'ENOENT') throw new Error(`exec grader: interpreter "${interp}" not found`);
@@ -116,7 +171,9 @@ export async function grade(
   if (grader.type === 'includes' || grader.type === 'regex') return gradeDeterministic(grader, output);
 
   if (grader.type === 'exec') {
-    const program = `${extractCode(output)}\n\n${grader.tests}\n`;
+    const checks = splitChecks(grader.tests);
+    const code = extractCode(output);
+    const program = grader.language === 'python' ? pythonHarness(code, checks) : nodeHarness(code, checks);
     return runProgram(grader.language, program, grader.timeoutMs ?? 10_000);
   }
 
