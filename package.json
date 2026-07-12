@@ -1,8 +1,30 @@
 {
-  "name": "loupe",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@cihlarr/loupe",
+  "version": "0.1.1",
+  "description": "Builder + reviewer loop for LLMs — and a harness that measures whether the review is worth it",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RadekCihlar/Loupe.git"
+  },
+  "keywords": [
+    "llm",
+    "benchmark",
+    "review",
+    "eval",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
+  "bin": {
+    "loupe": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "benchmark"
+  ],
   "engines": {
     "node": ">=24"
   },
@@ -10,6 +32,8 @@
     "setup": "tsx src/cli.ts setup",
     "run": "tsx src/cli.ts run",
     "bench": "tsx src/cli.ts bench",
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "test": "tsx --test src/*.test.ts src/engines/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
