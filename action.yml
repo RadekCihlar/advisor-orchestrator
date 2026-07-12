@@ -1,0 +1,68 @@
+# Reusable composite action (ROADMAP #9): gate prompt/model changes on PRs with
+# `bench --fail-under`. Runs loupe from this repo's checkout against the CALLER's
+# task file. CI has no provider CLIs or subscriptions, so the defaults use the
+# key-based engines (ROADMAP #5) — set ANTHROPIC_API_KEY / OPENAI_API_KEY as env
+# on the step from your repo's secrets; this action never reads or stores them.
+#
+# Usage in a caller workflow:
+#   - uses: <owner>/loupe@master
+#     env:
+#       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#     with:
+#       tasks: benchmark/my-tasks.json
+#       fail-under: '0.8'
+name: loupe bench
+description: Benchmark builder/reviewer arms on your task file and fail the job when the best arm scores below a quality bar.
+inputs:
+  tasks:
+    description: Task file path in the caller repo (bench --tasks). Ignored when pack is set.
+    default: ''
+  pack:
+    description: 'Built-in pack: coding | reasoning | constraint'
+    default: ''
+  fail-under:
+    description: Quality bar 0..1 — the job fails when the best arm scores below it.
+    default: '0.8'
+  builder-engine:
+    description: 'Engine for the builder role (CI-friendly: anthropic-api | openai-api).'
+    default: 'anthropic-api'
+  builder-model:
+    description: Builder model; empty = engine default.
+    default: ''
+  reviewer-engine:
+    description: Engine for the reviewer role.
+    default: 'anthropic-api'
+  reviewer-model:
+    description: Reviewer model; empty = engine default.
+    default: ''
+  extra-args:
+    description: Extra bench flags verbatim, e.g. "--repeat 3 --consults 2 --judge-engine openai-api".
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+    - run: npm ci
+      shell: bash
+      working-directory: ${{ github.action_path }}
+    # Inputs go through env, not ${{ }} inside the script — template-injection guard.
+    - run: |
+        ARGS=(bench --fail-under "$FAIL_UNDER" --builder-engine "$BUILDER_ENGINE" --reviewer-engine "$REVIEWER_ENGINE")
+        [ -n "$PACK" ] && ARGS+=(--pack "$PACK")
+        [ -n "$PACK" ] || [ -z "$TASKS" ] || ARGS+=(--tasks "$GITHUB_WORKSPACE/$TASKS")
+        [ -n "$BUILDER_MODEL" ] && ARGS+=(--builder-model "$BUILDER_MODEL")
+        [ -n "$REVIEWER_MODEL" ] && ARGS+=(--reviewer-model "$REVIEWER_MODEL")
+        npx tsx src/cli.ts "${ARGS[@]}" $EXTRA_ARGS
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        TASKS: ${{ inputs.tasks }}
+        PACK: ${{ inputs.pack }}
+        FAIL_UNDER: ${{ inputs.fail-under }}
+        BUILDER_ENGINE: ${{ inputs.builder-engine }}
+        BUILDER_MODEL: ${{ inputs.builder-model }}
+        REVIEWER_ENGINE: ${{ inputs.reviewer-engine }}
+        REVIEWER_MODEL: ${{ inputs.reviewer-model }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}

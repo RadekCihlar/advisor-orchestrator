@@ -1,0 +1,48 @@
+# Exercises the composite action as a real caller (ROADMAP v2 #2):
+# `uses: RadekCihlar/Loupe@master` resolved from origin, not a local path.
+# No API key secret needed — the pass job runs local (Ollama) engines on the
+# runner; the fail job proves a non-zero action exit fails the caller job.
+# Manual trigger: it costs runner minutes and a model download.
+name: action-test
+on:
+  workflow_dispatch:
+
+jobs:
+  gate-pass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Start Ollama + pull tiny model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/tags >/dev/null && break; sleep 2; done
+          ollama pull qwen2.5:0.5b
+      - name: Run loupe action (local engines, bar 0 — plumbing test)
+        uses: RadekCihlar/Loupe@master
+        with:
+          pack: reasoning
+          fail-under: '0'
+          builder-engine: local
+          builder-model: qwen2.5:0.5b
+          reviewer-engine: local
+          reviewer-model: qwen2.5:0.5b
+          extra-args: '--task reasoning-letter-count --repeat 1'
+
+  gate-fail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run loupe action with a bogus engine (must exit non-zero)
+        id: bogus
+        continue-on-error: true
+        uses: RadekCihlar/Loupe@master
+        with:
+          pack: reasoning
+          builder-engine: no-such-engine
+          reviewer-engine: no-such-engine
+      - name: Assert the failure propagated
+        run: |
+          if [ "${{ steps.bogus.outcome }}" != "failure" ]; then
+            echo "expected the action step to fail, got: ${{ steps.bogus.outcome }}"
+            exit 1
+          fi
