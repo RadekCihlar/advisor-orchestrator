@@ -58,29 +58,15 @@ export function parseJudgeScore(text: string): number | null {
   return Math.max(0, Math.min(10, last)) / 10;
 }
 
-// Pull runnable code out of an LLM reply.
-// - If it fenced the code, use ONLY the fenced blocks (join all) — prose outside
-//   the fences is ignored.
-// - If there are no fences, treat the text as code but drop a trailing
-//   prose/decoration block that ambient session context sometimes injects
-//   (e.g. a "★ Insight ───" box). Without this, that prose gets concatenated
-//   with the tests and breaks the program — scoring correct code as a failure.
+// Pull runnable code out of an LLM reply. Fence-preferred: fenced blocks are
+// the code (joined in order), prose outside them is ignored. No fences → the
+// text IS the code, verbatim. The old trailing-prose-stripping heuristics are
+// gone: contamination is fixed at the source (design §23/§24 — the builder
+// runs vanilla), so leftover prose should fail the exec grader loudly instead
+// of being silently trimmed by regexes that could also eat legitimate code.
 export function extractCode(output: string): string {
-  const fences = [...output.matchAll(/```(?:[a-zA-Z0-9+#.-]*)\n([\s\S]*?)```/g)].map((m) => m[1]);
-  if (fences.length > 0) return fences.join('\n');
-
-  // No fences: code comes first; strip a trailing prose/decoration block the
-  // ambient session style tends to append (a "★ Insight" box, ─ rules, a
-  // backtick note, or a plain explanatory sentence). Best-effort — the real fix
-  // is stopping the builder from inheriting an explanatory output style at all.
-  const isCut = (l: string): boolean =>
-    /^\s*(★|`)/.test(l) || // ★ bullet / backtick-prose line
-    /[─—]{3,}/.test(l) || // box-drawing / em-dash rule
-    /^\s*(-{5,}|={5,})\s*$/.test(l) || // markdown horizontal rule
-    /^[A-Z][^;{}()=]*\s[^;{}()=]*[.!?]\s*$/.test(l); // a prose sentence with no code punctuation
-  const lines = output.split('\n');
-  const cut = lines.findIndex(isCut);
-  return (cut === -1 ? lines : lines.slice(0, cut)).join('\n');
+  const fences = [...output.matchAll(/```(?:[a-zA-Z0-9+#.-]*)\n([\s\S]*?)```/g)].map((m) => m[1].replace(/\n$/, ''));
+  return fences.length > 0 ? fences.join('\n') : output;
 }
 
 // Per-assertion scoring (ROADMAP #4): one check per non-empty line of `tests`.

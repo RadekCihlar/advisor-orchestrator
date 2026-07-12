@@ -74,24 +74,20 @@ test('extractCode: fenced blocks win, surrounding prose ignored', () => {
   assert.equal(extractCode('sure:\n```js\nconst x = 1;\n```\nhope that helps').trim(), 'const x = 1;');
 });
 
-test('extractCode: no fence → strips trailing ★ Insight decoration (correct code no longer false-fails)', async () => {
-  const out = 'function f() { return 1; }\n\n★ Insight ─────────\n- note\n─────────';
-  assert.equal(extractCode(out).trim(), 'function f() { return 1; }');
-  // and it now runs clean through the exec grader
-  const r = await grade({ type: 'exec', language: 'node', tests: 'if (f() !== 1) throw new Error("bad");' }, out);
-  assert.equal(r.score, 1);
+test('extractCode: multiple fenced blocks join, in order', () => {
+  const out = 'setup:\n```js\nconst a = 1;\n```\nthen:\n```js\nconst b = 2;\n```\ndone';
+  assert.equal(extractCode(out).trim(), 'const a = 1;\nconst b = 2;');
 });
 
-test('extractCode: strips trailing backtick-prose and plain explanatory sentences', () => {
-  const backtick = 'function f() { return 1; }\n\n`String(1.0)` becomes "1" here.';
-  assert.equal(extractCode(backtick).trim(), 'function f() { return 1; }');
-  const sentence = 'function f() { return 1; }\n\nThis multiplies before flooring to avoid rounding.';
-  assert.equal(extractCode(sentence).trim(), 'function f() { return 1; }');
-});
-
-test('extractCode: keeps legitimate code (comments, JSDoc) intact', () => {
+test('extractCode: no fence → verbatim (no prose-stripping heuristics)', () => {
+  // Contamination is fixed at the source (design §23/§24): the builder runs
+  // vanilla, so unfenced output IS the code. Prose in it should fail the exec
+  // grader loudly, not be silently trimmed by a heuristic that can also eat
+  // legitimate code.
   const code = '// Returns one.\nfunction f() {\n  return 1;\n}';
-  assert.equal(extractCode(code).trim(), code);
+  assert.equal(extractCode(code), code);
+  const withTrailingProse = 'function f() { return 1; }\n\nThis multiplies before flooring.';
+  assert.equal(extractCode(withTrailingProse), withTrailingProse);
 });
 
 test('splitChecks: one check per non-empty line', () => {
