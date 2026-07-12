@@ -511,3 +511,15 @@ section and the native-Advisor comparison removed, install-first structure
 real `RadekCihlar/Loupe@master`, honest-limits list kept. 0.1.1 bumped to
 carry it (npm never re-renders a published version). Repo flipping to public —
 required for the banner/badge/repo links to render on npm.
+
+**Action verified from a real caller (v2 roadmap #2).**
+`.github/workflows/action-test.yml` consumes `uses: RadekCihlar/Loupe@master`
+resolved from origin. No key secret exists yet, so the pass job installs
+Ollama on the runner, pulls `qwen2.5:0.5b`, and drives the action with `local`
+engines: pack task ran all 4 arms, the report rendered ($/task column
+included), and `--fail-under 0` exited PASS. A second job passes a bogus
+engine name and asserts the step outcome is `failure` — non-zero exit
+propagates to the caller. Both green on the first dispatch (gate-pass 122s,
+gate-fail 11s). Untested until a key secret exists: `env:` key pass-through.
+Housekeeping: GitHub default branch switched `main` → `master` (`main` was a
+stale subset; every reference — badges, `uses:` — already said master).

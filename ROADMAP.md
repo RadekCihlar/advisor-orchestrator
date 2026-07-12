@@ -33,10 +33,14 @@ Closing these converts "written to spec" into "verified live".
    key; compare the `$` estimate against the provider's own usage numbers.
    Blocked on: a key in the env.
 
-2. **Exercise the GitHub Action from a caller workflow** `[useful]` · S — a
-   minimal repo that `uses: RadekCihlar/Loupe@master` with a pack + fail-under,
-   confirming inputs, key pass-through, and the gate's exit code. Blocked on:
-   repo public + master pushed + `ANTHROPIC_API_KEY` secret in the caller.
+2. ✅ **DONE — exercise the GitHub Action from a caller workflow** `[useful]` —
+   `.github/workflows/action-test.yml` consumes `uses: RadekCihlar/Loupe@master`
+   as a real caller (resolved from origin, not a local path): a pass job runs
+   the reasoning pack through Ollama on the runner (no key secret needed) and
+   the gate exits 0; a fail job proves a bogus engine's non-zero exit fails the
+   caller job. Verified 2026-07-12, both jobs green. Still untested: key
+   pass-through via `env:` (needs an `ANTHROPIC_API_KEY` secret — folds into
+   #1) (design §28).
 
 3. **Codex engine live** `[useful]` · S — run the existing `codex` engine
    against a real CLI. Blocked on: codex not installed on the dev machine
