@@ -1,0 +1,38 @@
+[
+  {
+    "id": "hard-semver-compare",
+    "prompt": "Write a JavaScript function compareSemver(a, b) comparing two semantic version strings (no build metadata), returning -1 if a<b, 0 if equal, 1 if a>b. Full SemVer precedence: compare major.minor.patch numerically; a version WITH a prerelease is lower than the same version without one; prerelease identifiers (dot-separated) compare left to right — numeric identifiers compare as numbers, alphanumeric ones lexically, numeric identifiers are always lower than alphanumeric ones, and if all shared identifiers are equal the longer prerelease list wins. Return only the code, no explanation.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if(compareSemver('1.0.0','1.0.0')!==0)throw new Error('equal versions')\nif(compareSemver('1.0.0','2.0.0')!==-1)throw new Error('major order')\nif(compareSemver('1.10.0','1.9.0')!==1)throw new Error('minor compares numerically, not lexically')\nif(compareSemver('1.0.0-alpha','1.0.0')!==-1)throw new Error('prerelease < release')\nif(compareSemver('1.0.0','1.0.0-alpha')!==1)throw new Error('release > prerelease')\nif(compareSemver('1.0.0-alpha','1.0.0-alpha.1')!==-1)throw new Error('shorter prerelease prefix is lower')\nif(compareSemver('1.0.0-alpha.1','1.0.0-alpha.beta')!==-1)throw new Error('numeric identifier < alphanumeric')\nif(compareSemver('1.0.0-alpha.beta','1.0.0-beta')!==-1)throw new Error('alphanumeric compares lexically')\nif(compareSemver('1.0.0-beta.2','1.0.0-beta.11')!==-1)throw new Error('numeric identifiers compare as numbers')\nif(compareSemver('1.0.0-beta.11','1.0.0-beta.2')!==1)throw new Error('symmetric numeric compare')\nif(compareSemver('1.0.0-rc.1','1.0.0-rc.1')!==0)throw new Error('equal prereleases')"
+    }
+  },
+  {
+    "id": "hard-parse-duration",
+    "prompt": "Write a JavaScript function parseDuration(s) that parses an ISO-8601 duration limited to days/hours/minutes/seconds (forms like P2D, PT1H30M, P1DT2H3M4.5S) and returns the total number of seconds. Fractional values are allowed on seconds. Throw an Error for anything else: years/months/weeks designators, a bare 'P', a 'T' with nothing after it, missing 'P', or any malformed string. Note the ambiguity trap: 'M' before the 'T' section would mean months (unsupported — throw), 'M' after 'T' means minutes. Return only the code, no explanation.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if(parseDuration('PT0S')!==0)throw new Error('zero seconds')\nif(parseDuration('P1D')!==86400)throw new Error('one day')\nif(parseDuration('PT1H2M3S')!==3723)throw new Error('h+m+s')\nif(parseDuration('P1DT1S')!==86401)throw new Error('day + second across T')\nif(parseDuration('PT90M')!==5400)throw new Error('minutes need no normalization')\nif(parseDuration('PT0.5S')!==0.5)throw new Error('fractional seconds')\nif((()=>{try{parseDuration('P1M');return true}catch(e){return false}})())throw new Error('P1M is months — must throw')\nif((()=>{try{parseDuration('P');return true}catch(e){return false}})())throw new Error('bare P must throw')\nif((()=>{try{parseDuration('PT');return true}catch(e){return false}})())throw new Error('dangling T must throw')\nif((()=>{try{parseDuration('1H');return true}catch(e){return false}})())throw new Error('missing P must throw')\nif((()=>{try{parseDuration('P1Y');return true}catch(e){return false}})())throw new Error('years must throw')"
+    }
+  },
+  {
+    "id": "hard-merge-intervals",
+    "prompt": "Write a JavaScript function mergeIntervals(intervals) taking an array of [start, end] integer pairs (each with start <= end, possibly unsorted) and returning a new array of merged, sorted, non-overlapping intervals. Intervals that merely touch (e.g. [1,2] and [2,3]) merge into one. The input array and its inner pairs must NOT be mutated. An empty input returns an empty array. Return only the code, no explanation.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if(JSON.stringify(mergeIntervals([[1,3],[2,6],[8,10]]))!=='[[1,6],[8,10]]')throw new Error('basic overlap merge')\nif(JSON.stringify(mergeIntervals([[1,2],[2,3]]))!=='[[1,3]]')throw new Error('touching intervals merge')\nif(JSON.stringify(mergeIntervals([[1,10],[2,3]]))!=='[[1,10]]')throw new Error('nested interval absorbed')\nif(JSON.stringify(mergeIntervals([[8,10],[1,3]]))!=='[[1,3],[8,10]]')throw new Error('unsorted input handled + output sorted')\nif(JSON.stringify(mergeIntervals([[-5,-2],[-3,0]]))!=='[[-5,0]]')throw new Error('negative bounds')\nif(JSON.stringify(mergeIntervals([[4,4],[4,4]]))!=='[[4,4]]')throw new Error('duplicate point intervals')\nif(JSON.stringify(mergeIntervals([]))!=='[]')throw new Error('empty input')\nif(JSON.stringify(mergeIntervals([[7,9]]))!=='[[7,9]]')throw new Error('single interval untouched')\nconst _inp=[[5,6],[1,2]];mergeIntervals(_inp);if(JSON.stringify(_inp)!=='[[5,6],[1,2]]')throw new Error('input array was mutated')"
+    }
+  },
+  {
+    "id": "hard-csv-line",
+    "prompt": "Write a JavaScript function parseCsvLine(line) that splits ONE CSV line into an array of field strings per RFC 4180 quoting rules: fields are comma-separated; a field wrapped in double quotes may contain commas; a doubled quote inside a quoted field is an escaped literal quote; unquoted whitespace is preserved as-is. An empty line yields one empty field. A trailing comma yields a trailing empty field. Return only the code, no explanation.",
+    "grader": {
+      "type": "exec",
+      "language": "node",
+      "tests": "if(JSON.stringify(parseCsvLine('a,b,c'))!=='[\"a\",\"b\",\"c\"]')throw new Error('plain fields')\nif(JSON.stringify(parseCsvLine('a,\"b,c\",d'))!=='[\"a\",\"b,c\",\"d\"]')throw new Error('quoted field with comma')\nconst _q=parseCsvLine('a,\"he said \"\"hi\"\"\",b');if(_q.length!==3||_q[1]!=='he said \"hi\"'||_q[2]!=='b')throw new Error('escaped quotes inside quoted field')\nif(JSON.stringify(parseCsvLine('a,,b'))!=='[\"a\",\"\",\"b\"]')throw new Error('empty middle field')\nif(JSON.stringify(parseCsvLine('a,b,'))!=='[\"a\",\"b\",\"\"]')throw new Error('trailing comma → trailing empty field')\nif(JSON.stringify(parseCsvLine(''))!=='[\"\"]')throw new Error('empty line → one empty field')\nif(JSON.stringify(parseCsvLine('\"\"'))!=='[\"\"]')throw new Error('bare quoted empty field')\nif(JSON.stringify(parseCsvLine(' a ,b'))!=='[\" a \",\"b\"]')throw new Error('unquoted whitespace preserved')\nif(JSON.stringify(parseCsvLine('\"x\"'))!=='[\"x\"]')throw new Error('single quoted field')"
+    }
+  }
+]

@@ -18,7 +18,7 @@ inputs:
     description: Task file path in the caller repo (bench --tasks). Ignored when pack is set.
     default: ''
   pack:
-    description: 'Built-in pack: coding | reasoning | constraint'
+    description: 'Built-in pack: coding | reasoning | constraint | hard'
     default: ''
   fail-under:
     description: Quality bar 0..1 — the job fails when the best arm scores below it.

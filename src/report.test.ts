@@ -58,6 +58,53 @@ test('formatReport: graded set names best quality + cheapest-at-top + vs-baselin
   assert.match(out, /advised: \+0\.30 quality vs baseline at/);
 });
 
+test('formatReport: near-tie cheaper arm gets the cost-aware callout (ROADMAP #5)', () => {
+  const out = formatReport(
+    aggregate([
+      rec('baseline', 0.6, 100, 50),
+      rec('self-review', 0.89, 250, 90), // within EPS of best, ~0.06× advised's tokens
+      rec('advised', 0.9, 4000, 120, 1000),
+    ]),
+  );
+  // 0.01 below best, at a fraction of the tokens → callout names both arms + the trade
+  assert.match(out, /self-review matches advised within 0\.01 at 0\.1× its tokens/);
+});
+
+test('formatReport: no cost-aware callout when the best arm is also cheapest at top', () => {
+  const out = formatReport(
+    aggregate([
+      rec('baseline', 0.6, 100, 50),
+      rec('advised', 0.9, 400, 120),
+    ]),
+  );
+  assert.doesNotMatch(out, /matches .* within/);
+});
+
+test('formatReport: significance — clear separation between top arm and runner-up (ROADMAP #4)', () => {
+  const out = formatReport(
+    aggregate([
+      rec('baseline', 0.5, 100, 50), rec('baseline', 0.55, 100, 50), rec('baseline', 0.45, 100, 50),
+      rec('advised', 1.0, 400, 80), rec('advised', 0.9, 400, 80), rec('advised', 0.95, 400, 80),
+    ]),
+  );
+  assert.match(out, /Significance:\s+advised \+0\.45 vs baseline — clear at this n/);
+});
+
+test('formatReport: significance — overlapping arms are called inconclusive with a repeat estimate', () => {
+  const out = formatReport(
+    aggregate([
+      rec('baseline', 0.5, 100, 50), rec('baseline', 0.8, 100, 50),
+      rec('advised', 0.6, 400, 80), rec('advised', 0.9, 400, 80),
+    ]),
+  );
+  assert.match(out, /Significance:\s+advised \+0\.10 vs baseline — inconclusive at this n, run ~\d+ more repeats/);
+});
+
+test('formatReport: significance — n<2 on an arm says more repeats are needed', () => {
+  const out = formatReport(aggregate([rec('baseline', 0.5, 100, 50), rec('advised', 0.9, 400, 80)]));
+  assert.match(out, /Significance:\s+n too small .*--repeat/);
+});
+
 test('formatReport: ungraded set explains how to get a verdict', () => {
   const out = formatReport(aggregate([rec('baseline', null, 100, 50), rec('advised', null, 4000, 120)]));
   assert.match(out, /no graders/);

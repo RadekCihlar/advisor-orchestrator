@@ -119,7 +119,22 @@ export function formatReport(stats: ArmStats[]): string {
 
   lines.push('Verdict:');
   lines.push(`  Best quality:            ${bestQualityLabel(graded, bestScore)}`);
+  const sig = significanceLine(graded);
+  if (sig) lines.push(`  Significance:            ${sig}`);
   lines.push(`  Cheapest at top quality: ${cheapestAtTop.mode} (${n0(cheapestAtTop.meanTotalTokens)} tokens/task, score ${cheapestAtTop.meanScore.toFixed(2)})`);
+  // Cost-aware callout (ROADMAP #5): when a strictly-lower-scoring arm sits
+  // within EPS of the best AND is cheaper, quantify the trade explicitly —
+  // "second place at 40% of the cost" is the verdict most users act on.
+  const winners = graded.filter((s) => s.meanScore >= bestScore - 1e-9);
+  if (!winners.some((w) => w.mode === cheapestAtTop.mode)) {
+    const bestArm = [...winners].sort((a, b) => a.meanTotalTokens - b.meanTotalTokens)[0];
+    if (bestArm.meanTotalTokens > 0 && cheapestAtTop.meanTotalTokens < bestArm.meanTotalTokens) {
+      const ratio = cheapestAtTop.meanTotalTokens / bestArm.meanTotalTokens;
+      lines.push(
+        `    → ${cheapestAtTop.mode} matches ${bestArm.mode} within ${(bestScore - cheapestAtTop.meanScore).toFixed(2)} at ${ratio.toFixed(1)}× its tokens — the cost-aware pick.`,
+      );
+    }
+  }
   if (baseline) {
     for (const s of graded) {
       if (s.mode === 'baseline') continue;
@@ -136,6 +151,32 @@ export function formatReport(stats: ArmStats[]): string {
 function bestQualityLabel(graded: Array<ArmStats & { meanScore: number }>, bestScore: number): string {
   const winners = graded.filter((s) => s.meanScore >= bestScore - 1e-9).map((s) => s.mode);
   return `${winners.join(', ')} (score ${bestScore.toFixed(2)})`;
+}
+
+// ROADMAP #4: is the top arm actually ahead of the runner-up, or is the gap
+// noise at this n? Welch-style separation from the stats we already collect
+// (mean, sample stddev, graded-run count) — own math, no stats dependency.
+// t >= 2 is treated as "clear" (~95% for the small n bench runs at); below
+// that the line says inconclusive and estimates how many more repeats would
+// separate the same gap at the observed variance: solving t=2 with equal
+// per-arm n gives n ≈ 4·(s1²+s2²)/diff².
+function significanceLine(graded: Array<ArmStats & { meanScore: number }>): string | null {
+  if (graded.length < 2) return null; // one arm — nothing to compare
+  const ranked = [...graded].sort((a, b) => b.meanScore - a.meanScore);
+  const [top, second] = ranked;
+  const diff = top.meanScore - second.meanScore;
+  const label = `${top.mode} ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} vs ${second.mode}`;
+  if (top.stddevScore === null || second.stddevScore === null) {
+    return `n too small for a significance read (need ≥2 graded runs per arm — raise --repeat)`;
+  }
+  if (diff === 0) return `${label} — identical mean scores, nothing to separate`;
+  const se = Math.sqrt(top.stddevScore ** 2 / top.gradedRuns + second.stddevScore ** 2 / second.gradedRuns);
+  if (se === 0) return `${label} — clear at this n (zero variance in both arms)`;
+  const t = diff / se;
+  if (t >= 2) return `${label} — clear at this n (t≈${t.toFixed(1)})`;
+  const nNeeded = Math.ceil((4 * (top.stddevScore ** 2 + second.stddevScore ** 2)) / diff ** 2);
+  const more = Math.max(1, nNeeded - Math.max(top.gradedRuns, second.gradedRuns));
+  return `${label} — inconclusive at this n, run ~${more} more repeats (t≈${t.toFixed(1)})`;
 }
 
 // Serializable bundle for `bench --out results.json` — lets runs accumulate and

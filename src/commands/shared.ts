@@ -42,7 +42,7 @@ export const USAGE = `Usage:
     List detected providers — which engines are usable on this machine.
 
   tsx src/cli.ts bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json]
-    [--pack coding|reasoning|constraint] [--task <id>] [--parallel N]
+    [--pack coding|reasoning|constraint|hard] [--task <id>] [--parallel N]
     --parallel N runs N units at once (compact tagged output; same-provider
     calls share rate limits). Default 1 = sequential, full per-run output.
     --pack <name> runs benchmark/packs/<name>.json; --task <id> runs one task.
@@ -56,6 +56,13 @@ export const USAGE = `Usage:
     Point --tasks at your own workload to learn which mode wins for it. Small n is
     directional, not statistically significant — raise --repeat for confidence.
     Task graders: { "type": "includes"|"regex"|"judge", ... } (see README).
+
+  tsx src/cli.ts probe [--reviewer-engine X] [--reviewer-model X] [--probe file.json]
+    Measure a reviewer's defect catch rate BEFORE trusting it in advised runs:
+    feeds it known-defective + known-correct outputs (benchmark/probe.json by
+    default, through the exact prompt real runs use) and reports catch rate,
+    false-alarm rate, and a verdict. A rubber-stamp reviewer (approves planted
+    defects) is worse than no reviewer — it launders broken output.
 
   tsx src/cli.ts diff a.json b.json
     Compare two \`bench --out\` result files per arm — did my prompt/model/config

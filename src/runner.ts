@@ -89,7 +89,9 @@ const firstLineOf = (text: string, max = 100) => {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 };
 
-const reviewerPromptFor = (task: string, output: string): string =>
+// Exported so the catch-rate probe (src/probe.ts) asks the reviewer EXACTLY
+// what real runs ask — a probe on a different prompt would measure nothing.
+export const reviewerPromptFor = (task: string, output: string): string =>
   `You are reviewing another AI's work.\n\nTask: ${task}\n\nIts output:\n${output}\n\nGive a short, specific critique of concrete problems only. If it is already correct and complete, respond with exactly "APPROVED" and nothing else.`;
 
 // callFn is injectable so the loop's control flow can be unit-tested without

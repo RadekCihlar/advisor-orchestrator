@@ -9,6 +9,7 @@ import { cmdBench } from './commands/bench.js';
 import { cmdSetup } from './commands/setup.js';
 import { cmdProviders } from './commands/providers.js';
 import { cmdDiff } from './commands/diff.js';
+import { cmdProbe } from './commands/probe.js';
 
 const BOOL_FLAGS = new Set(['json', 'help']); // never consume the next arg as a value
 
@@ -43,6 +44,7 @@ async function main() {
     return;
   }
   if (command === 'diff') return cmdDiff(positional);
+  if (command === 'probe') return cmdProbe(flags);
   if (command === 'providers') return cmdProviders();
   if (command === 'setup') return cmdSetup();
   if (command === 'run') return cmdRun(flags, positional);

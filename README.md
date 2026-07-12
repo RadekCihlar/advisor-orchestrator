@@ -69,7 +69,15 @@ loupe bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one
 
 Grades every arm, prints a quality × cost table (mean ±stddev per arm, `$`/task where priceable, a warning when n is too small to conclude) + verdict, saves the full data to JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear your bar.
 
-Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`, `constraint` — all deterministic graders, each proven against a reference solution offline. Point `--tasks` at your own workload to learn which mode wins for *it*.
+Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`, `constraint`, `hard` (edge-case-dense — headroom for review to visibly help where strong builders saturate the others) — all deterministic graders, each proven against a reference solution offline. Point `--tasks` at your own workload to learn which mode wins for *it*.
+
+Not sure the reviewer you picked is worth consulting? Probe it first:
+
+```sh
+loupe probe --reviewer-engine local --reviewer-model qwen2.5:3b
+```
+
+Feeds it known-defective + known-correct outputs (through the exact prompt real runs use) and reports catch rate, false-alarm rate, and a verdict — a **rubber-stamp** reviewer approves planted defects and is worse than no reviewer at all.
 
 Graders per task:
 

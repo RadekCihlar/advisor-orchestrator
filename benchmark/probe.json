@@ -1,0 +1,72 @@
+[
+  {
+    "id": "lru-pop-noargs",
+    "task": "Write a Python class LRUCache(capacity) with get(key) and put(key, value) methods, both O(1) time. get returns the value or -1 if missing, and marks the key as recently used. put inserts/updates a key and evicts the least-recently-used entry if capacity is exceeded. Return only the code, no explanation.",
+    "output": "```python\nimport collections\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.cache = collections.OrderedDict()\n        self.capacity = capacity\n\n    def get(self, key: str) -> int:\n        if key not in self.cache:\n            return -1\n        else:\n            self.cache.move_to_end(key)\n            return self.cache.pop()[0]\n\n    def put(self, key: str, value: 'Any') -> None:\n        if len(self.cache) == self.capacity:\n            self.cache.popitem(last=False)\n\n        self.cache[key] = value\n        self.cache.move_to_end(key)\n```",
+    "defective": true,
+    "note": "get() calls self.cache.pop() with no key argument — TypeError on every cache hit, and would evict on read even if it worked. This exact output was APPROVED by a 3B local reviewer in a live run (CHANGELOG §29)."
+  },
+  {
+    "id": "lru-correct",
+    "task": "Write a Python class LRUCache(capacity) with get(key) and put(key, value) methods, both O(1) time. get returns the value or -1 if missing, and marks the key as recently used. put inserts/updates a key and evicts the least-recently-used entry if capacity is exceeded. Return only the code, no explanation.",
+    "output": "```python\nfrom collections import OrderedDict\n\n\nclass LRUCache:\n    def __init__(self, capacity: int):\n        self.capacity = capacity\n        self.cache = OrderedDict()\n\n    def get(self, key: int) -> int:\n        if key not in self.cache:\n            return -1\n        self.cache.move_to_end(key)\n        return self.cache[key]\n\n    def put(self, key: int, value: int) -> None:\n        if key in self.cache:\n            self.cache.move_to_end(key)\n        self.cache[key] = value\n        if len(self.cache) > self.capacity:\n            self.cache.popitem(last=False)\n```",
+    "defective": false,
+    "note": "Correct OrderedDict implementation — approved by codex round 0 in a live run."
+  },
+  {
+    "id": "palindrome-correct",
+    "task": "Write a Python function is_palindrome(s) that returns True if a string is a palindrome, ignoring case, spaces, and punctuation.",
+    "output": "```python\ndef is_palindrome(s):\n    \"\"\"Return True if s is a palindrome, ignoring case, spaces, and punctuation.\"\"\"\n    cleaned = ''.join(c for c in s.lower() if c.isalnum())\n    return cleaned == cleaned[::-1]\n```",
+    "defective": false,
+    "note": "Correct: normalizes with isalnum + lower, compares against reverse."
+  },
+  {
+    "id": "truncate-ascii-ellipsis",
+    "task": "Write a JavaScript function truncate(s, n) that returns s unchanged when s.length <= n, otherwise returns the first n-1 characters of s followed by a single unicode ellipsis character. Return only the code, no explanation.",
+    "output": "```javascript\nfunction truncate(s, n) {\n    if (s.length <= n) return s;\n    else return s.substring(0, n - 1) + '...';\n}\n```",
+    "defective": true,
+    "note": "Uses three ASCII dots instead of the single unicode ellipsis character — result is n+2 chars long, violating both stated requirements."
+  },
+  {
+    "id": "truncate-correct",
+    "task": "Write a JavaScript function truncate(s, n) that returns s unchanged when s.length <= n, otherwise returns the first n-1 characters of s followed by a single unicode ellipsis character. Return only the code, no explanation.",
+    "output": "```javascript\nfunction truncate(s, n) {\n  return s.length <= n ? s : s.slice(0, n - 1) + '…';\n}\n```",
+    "defective": false,
+    "note": "Correct: single '…' char, result length exactly n."
+  },
+  {
+    "id": "fizzbuzz-order",
+    "task": "Write a Python function fizzbuzz(n) that returns a list of strings for 1..n: 'Fizz' for multiples of 3, 'Buzz' for multiples of 5, 'FizzBuzz' for multiples of both, otherwise the number as a string.",
+    "output": "```python\ndef fizzbuzz(n):\n    out = []\n    for i in range(1, n + 1):\n        if i % 3 == 0:\n            out.append('Fizz')\n        elif i % 5 == 0:\n            out.append('Buzz')\n        elif i % 15 == 0:\n            out.append('FizzBuzz')\n        else:\n            out.append(str(i))\n    return out\n```",
+    "defective": true,
+    "note": "The % 15 branch is unreachable — multiples of 15 hit the % 3 branch first, so 15 yields 'Fizz', never 'FizzBuzz'."
+  },
+  {
+    "id": "fizzbuzz-correct",
+    "task": "Write a Python function fizzbuzz(n) that returns a list of strings for 1..n: 'Fizz' for multiples of 3, 'Buzz' for multiples of 5, 'FizzBuzz' for multiples of both, otherwise the number as a string.",
+    "output": "```python\ndef fizzbuzz(n):\n    out = []\n    for i in range(1, n + 1):\n        if i % 15 == 0:\n            out.append('FizzBuzz')\n        elif i % 3 == 0:\n            out.append('Fizz')\n        elif i % 5 == 0:\n            out.append('Buzz')\n        else:\n            out.append(str(i))\n    return out\n```",
+    "defective": false,
+    "note": "Correct: 15-case checked first."
+  },
+  {
+    "id": "binary-search-float-mid",
+    "task": "Write a Python function binary_search(arr, target) returning the index of target in the sorted list arr, or -1 if absent.",
+    "output": "```python\ndef binary_search(arr, target):\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) / 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n```",
+    "defective": true,
+    "note": "mid uses true division (/) not floor division (//) — arr[mid] raises TypeError on any list with more than one element."
+  },
+  {
+    "id": "binary-search-correct",
+    "task": "Write a Python function binary_search(arr, target) returning the index of target in the sorted list arr, or -1 if absent.",
+    "output": "```python\ndef binary_search(arr, target):\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n```",
+    "defective": false,
+    "note": "Correct: floor division, standard bounds."
+  },
+  {
+    "id": "sum-range-off-by-one",
+    "task": "Write a Python function sum_to(n) that returns the sum of all integers from 1 to n inclusive.",
+    "output": "```python\ndef sum_to(n):\n    return sum(range(n))\n```",
+    "defective": true,
+    "note": "range(n) is 0..n-1 — excludes n itself, so sum_to(3) returns 3 instead of 6."
+  }
+]

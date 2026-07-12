@@ -64,32 +64,29 @@ The report currently crowns the best mean. With n=3–5 that can be noise, and
 "best quality" can hide "second place at 40% of the cost". These make the
 verdict trustworthy — the quality core of v2.
 
-4. **Significance marker between arms** `[better]` · M — pairwise
-   overlap/effect-size hint next to the verdict ("advised +0.33 vs
-   self-review; stddevs overlap at this n — inconclusive, run ~N more
-   repeats"). Own math (CI overlap or Welch-style), no stats dependency. The
-   small-n warning was the v1 stub; this is the real thing.
+4. ✅ **DONE — Significance marker between arms** `[better]` — Welch-style
+   top-vs-runner-up separation in the verdict from the stats already
+   collected: "clear at this n (t≈7.3)" or "inconclusive at this n, run ~N
+   more repeats". Own math, no stats dependency (2026-07-12).
 
-5. **Cost-aware verdict** `[better]` · S — alongside "best quality", report
-   quality-per-cost and call out the cheapest arm within ε of the best score
-   ("self-review matches advised within 0.05 at 0.4× tokens"). Data already
-   exists (meanCostUsd, token totals) — this is a report change only.
+5. ✅ **DONE — Cost-aware verdict** `[better]` — the verdict now quantifies the
+   trade when a cheaper arm sits within ε of the best: "self-review matches
+   advised within 0.01 at 0.1× its tokens — the cost-aware pick"
+   (2026-07-12).
 
-6. **A pack with headroom (`hard`)** `[better]` · M — current packs saturate:
-   a strong builder aces baseline and every arm ties at "no gain, higher
-   cost". Build a pack calibrated so a strong solo builder lands ~0.5–0.8
-   (edge-case-dense exec tasks, multi-constraint outputs), leaving room for
-   review to visibly help or not. Prove graders against reference solutions
-   like the v1 packs.
+6. ✅ **DONE — A pack with headroom (`hard`)** `[better]` —
+   `benchmark/packs/hard.json`: semver prerelease precedence, ISO-8601
+   duration with the months trap, interval merge with a no-mutation check,
+   RFC-4180 CSV quoting. Every grader proven both ways in packs.test.ts:
+   reference scores 1.0, a plausible-buggy solution scores <1 (2026-07-12).
 
-11. **Reviewer catch-rate probe** `[better]` · S–M — born from the 2026-07-12
-    finding above: before trusting an advised verdict, measure whether the
-    reviewer actually catches defects. Feed it K outputs with known planted
-    bugs (derivable from pack reference solutions) plus K correct ones; report
-    catch rate + false-alarm rate. A reviewer below ~chance gets a loud
-    "rubber-stamp — worse than baseline" warning in the bench report. This is
-    the cheapest guard against the worst failure mode loupe has observed:
-    confidently approved broken code.
+11. ✅ **DONE — Reviewer catch-rate probe** `[better]` — `loupe probe`: feeds
+    the reviewer 5 planted-defect + 5 correct fixtures (benchmark/probe.json,
+    including the exact output a 3B reviewer rubber-stamped live) through the
+    real reviewer prompt; reports catch rate, false-alarm rate, and a verdict
+    with a loud rubber-stamp warning. Live-verified both directions:
+    codex/auto → trustworthy (5/5, 0 false alarms); qwen2.5:0.5b →
+    rubber-stamp (0/5) (2026-07-12).
 
 ## Later — gated until something needs them
 

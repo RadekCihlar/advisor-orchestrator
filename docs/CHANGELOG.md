@@ -560,3 +560,36 @@ stronger than the builder" with a floor on the reviewer itself.
 
 **Verified:** 97/97 tests, clean typecheck, live smoke of both CLI engines
 through `runBin` (codex 2.7s, claude 4.4s round-trip), five full live runs.
+
+## 30. Roadmap batch: significance + cost-aware verdict, reviewer probe, hard pack (2026-07-12)
+
+**ROADMAP v2 #4, #5, #6, #11 shipped in one batch.**
+
+- **Cost-aware verdict (#5).** When a strictly-lower-scoring arm sits within
+  ε (0.02) of the best AND is cheaper, the verdict quantifies the trade:
+  "self-review matches advised within 0.01 at 0.1× its tokens — the
+  cost-aware pick". Report-only change; the data was already collected.
+- **Significance marker (#4).** Welch-style top-vs-runner-up read from
+  mean/stddev/n per arm: t≥2 → "clear at this n", else "inconclusive at this
+  n, run ~N more repeats" (N from solving t=2 at the observed variance), with
+  explicit degradation when an arm has <2 graded runs. Own ~20 lines of math,
+  no dependency.
+- **Reviewer catch-rate probe (#11).** New `loupe probe` command +
+  `benchmark/probe.json`: 5 planted-defect + 5 correct outputs (one fixture
+  is the EXACT output a 3B reviewer approved live in §29) sent through the
+  runner's real reviewer prompt (now exported — a probe on a different
+  prompt measures nothing). Reports catch rate, false-alarm rate, and a
+  verdict: trustworthy / unreliable / over-critical / rubber-stamp, the last
+  with a loud "worse than no reviewer" warning. Live-verified both
+  directions: codex/auto 5/5 caught, 0 false alarms → trustworthy;
+  qwen2.5:0.5b 0/5 → rubber-stamp.
+- **`hard` pack (#6).** Four edge-case-dense exec(node) tasks where strong
+  builders have real headroom: semver prerelease precedence (numeric<alpha,
+  prefix rule), ISO-8601 duration (months-vs-minutes M trap, dangling T),
+  interval merging (touching intervals + input must not be mutated), RFC-4180
+  CSV quoting (doubled quotes, trailing empties). Ground truth proven both
+  ways in packs.test.ts: references score 1.0, plausible-buggy solutions
+  (lexical semver, any-M-is-minutes, in-place sort, split(',')) score <1.
+
+**Verified:** 117/117 tests (was 98), clean typecheck, probe live-run against
+two real reviewers.

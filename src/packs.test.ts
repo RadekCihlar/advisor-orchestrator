@@ -48,12 +48,74 @@ const good: Record<string, string> = {
   'constraint-seven-words': 'The ocean holds many secrets beneath waves.',
   'constraint-acrostic-loupe': 'Light bends through the glass\nOver every hidden flaw\nUntil the truth appears\nPatiently it waits\nEvery detail seen',
   'constraint-json-only': '{"name": "Mira Kalen", "age": 34}',
+  'hard-semver-compare': `function compareSemver(a,b){
+    const [ca,ra]=a.split(/-(.*)/s),[cb,rb]=b.split(/-(.*)/s);
+    const na=ca.split('.').map(Number),nb=cb.split('.').map(Number);
+    for(let i=0;i<3;i++){if(na[i]!==nb[i])return na[i]<nb[i]?-1:1;}
+    if(!ra&&!rb)return 0;
+    if(!ra)return 1;
+    if(!rb)return -1;
+    const ia=ra.split('.'),ib=rb.split('.');
+    for(let i=0;i<Math.max(ia.length,ib.length);i++){
+      const x=ia[i],y=ib[i];
+      if(x===undefined)return -1;
+      if(y===undefined)return 1;
+      const dx=/^\\d+$/.test(x),dy=/^\\d+$/.test(y);
+      if(dx&&dy){if(Number(x)!==Number(y))return Number(x)<Number(y)?-1:1;}
+      else if(dx)return -1;
+      else if(dy)return 1;
+      else if(x!==y)return x<y?-1:1;
+    }
+    return 0;
+  }`,
+  'hard-parse-duration': `function parseDuration(s){
+    const m=/^P(?:(\\d+(?:\\.\\d+)?)D)?(?:T(?:(\\d+(?:\\.\\d+)?)H)?(?:(\\d+(?:\\.\\d+)?)M)?(?:(\\d+(?:\\.\\d+)?)S)?)?$/.exec(s);
+    if(!m)throw new Error('invalid duration');
+    const [,d,h,mi,sec]=m;
+    if(d===undefined&&h===undefined&&mi===undefined&&sec===undefined)throw new Error('empty duration');
+    if(s.endsWith('T'))throw new Error('dangling T');
+    return Number(d||0)*86400+Number(h||0)*3600+Number(mi||0)*60+Number(sec||0);
+  }`,
+  'hard-merge-intervals': `function mergeIntervals(intervals){
+    const sorted=[...intervals].sort((p,q)=>p[0]-q[0]||p[1]-q[1]);
+    const out=[];
+    for(const [a,b] of sorted){
+      const last=out[out.length-1];
+      if(last&&a<=last[1])last[1]=Math.max(last[1],b);
+      else out.push([a,b]);
+    }
+    return out;
+  }`,
+  'hard-csv-line': `function parseCsvLine(line){
+    const out=[];let cur='';let i=0;let inQ=false;
+    while(i<line.length){
+      const ch=line[i];
+      if(inQ){
+        if(ch==='"'){if(line[i+1]==='"'){cur+='"';i+=2;continue;}inQ=false;i++;continue;}
+        cur+=ch;i++;continue;
+      }
+      if(ch==='"'){inQ=true;i++;continue;}
+      if(ch===','){out.push(cur);cur='';i++;continue;}
+      cur+=ch;i++;
+    }
+    out.push(cur);
+    return out;
+  }`,
 };
 const bad: Record<string, string> = {
   'coding-parse-range': 'function parseRange(s){return [1];}',
   'reasoning-prime-3599': 'It looks prime to me.\nANSWER: prime',
   'constraint-seven-words': 'The ocean holds many secrets beneath the rolling waves.',
   'constraint-json-only': 'Sure! Here is the JSON: {"name": "Mira", "age": 34}',
+  // Naive lexical compare: right on plain versions, wrong on 1.10 vs 1.9 and
+  // all prerelease precedence — the plausible first attempt.
+  'hard-semver-compare': 'function compareSemver(a,b){return a<b?-1:a>b?1:0;}',
+  // Treats any M as minutes and never validates — misses the months trap.
+  'hard-parse-duration': `function parseDuration(s){let t=0;const re=/(\\d+(?:\\.\\d+)?)([DHMS])/g;let m;while((m=re.exec(s))){const v=Number(m[1]);t+=m[2]==='D'?v*86400:m[2]==='H'?v*3600:m[2]==='M'?v*60:v;}return t;}`,
+  // Sorts the caller's array in place — right answers, mutated input.
+  'hard-merge-intervals': `function mergeIntervals(intervals){intervals.sort((p,q)=>p[0]-q[0]);const out=[];for(const [a,b] of intervals){const last=out[out.length-1];if(last&&a<=last[1])last[1]=Math.max(last[1],b);else out.push([a,b]);}return out;}`,
+  // split(',') — the classic non-parser; dies on any quoted comma.
+  'hard-csv-line': `function parseCsvLine(line){return line.split(',');}`,
 };
 
 for (const [file, tasks] of packs) {
