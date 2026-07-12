@@ -1,4 +1,6 @@
 import type { RunResult } from './runner.js';
+import type { EngineConfig } from './engines/types.js';
+import { estimateRunCostUsd } from './pricing.js';
 
 export interface TokenTally {
   inputTokens: number;
@@ -47,7 +49,7 @@ export function tallyTokens(result: RunResult): TokenTally {
 // is NOT: `local` is $0; `claude-code` is subscription-covered on a Claude.ai
 // plan but genuinely metered on Vertex/Bedrock — its notionalCostUsd is what the
 // call reports, informational only. Read it as tokens/calls, not "we saved $X".
-export function printUsage(result: RunResult): void {
+export function printUsage(result: RunResult, builder?: EngineConfig, reviewer?: EngineConfig): void {
   const t = tallyTokens(result);
   const lastRound = result.rounds.at(-1);
   console.log(`  mode: ${result.mode}`);
@@ -63,5 +65,10 @@ export function printUsage(result: RunResult): void {
     console.log(
       `  notional cost (subscription-covered on a plan, metered on Vertex/Bedrock): $${t.notionalCost.toFixed(4)} across ${t.claudeCodeCalls} claude-code call(s)`,
     );
+  } else if (builder && reviewer) {
+    // Metered API / free-local runs: estimated from the pricing table
+    // (ROADMAP #13). Silent when unpriceable — tokens above are the truth.
+    const cost = estimateRunCostUsd(result, builder, reviewer);
+    if (cost !== null) console.log(`  est. cost: $${cost.toFixed(4)} (pricing table in src/pricing.ts — verify rates)`);
   }
 }

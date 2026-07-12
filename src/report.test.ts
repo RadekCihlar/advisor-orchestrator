@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { aggregate, formatReport, reportJson, type RunRecord } from './report.js';
+import { aggregate, diffReports, formatReport, reportJson, type RunRecord } from './report.js';
 
 const rec = (
   mode: string,
@@ -9,6 +9,7 @@ const rec = (
   output: number,
   cacheCreate = 0,
   cacheRead = 0,
+  costUsd: number | null = null,
 ): RunRecord => ({
   taskId: 't',
   mode,
@@ -18,6 +19,7 @@ const rec = (
   cacheReadTokens: cacheRead,
   cacheCreationTokens: cacheCreate,
   rounds: 1,
+  costUsd,
 });
 
 test('aggregate: means + score range per arm', () => {
@@ -73,9 +75,9 @@ test('reportJson bundles meta + stats + records and round-trips through JSON', (
 
 test('aggregate: stddevScore is the sample stddev; null under 2 graded runs', () => {
   const recs = [
-    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
-    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
-    { taskId: 't', mode: 'baseline', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },
+    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },
+    { taskId: 't', mode: 'baseline', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },
   ];
   const stats = aggregate(recs);
   const advised = stats.find((s) => s.mode === 'advised')!;
@@ -84,10 +86,49 @@ test('aggregate: stddevScore is the sample stddev; null under 2 graded runs', ()
   assert.equal(baseline.stddevScore, null);
 });
 
+test('aggregate: meanCostUsd averages when all runs priced, null when any is not', () => {
+  const priced = aggregate([rec('baseline', 1, 1, 1, 0, 0, 0.1), rec('baseline', 1, 1, 1, 0, 0, 0.3)]);
+  assert.equal(priced[0].meanCostUsd, 0.2);
+  const mixed = aggregate([rec('advised', 1, 1, 1, 0, 0, 0.1), rec('advised', 1, 1, 1, 0, 0, null)]);
+  assert.equal(mixed[0].meanCostUsd, null);
+});
+
+test('formatReport: $/task column shows cost when priced, — when not', () => {
+  const out = formatReport(aggregate([rec('baseline', 1, 1, 1, 0, 0, 0.1234), rec('advised', 1, 1, 1, 0, 0, null)]));
+  assert.match(out, /\$\/task/);
+  assert.match(out, /\$0\.12/);
+  assert.match(out, /advised.*—\s*$/m);
+});
+
+test('diffReports: per-arm score and token deltas between two result files', () => {
+  const a = reportJson({ generatedAt: '2026-07-10T00:00:00Z' }, aggregate([rec('baseline', 0.5, 100, 50), rec('advised', 0.7, 400, 80)]), []);
+  const b = reportJson({ generatedAt: '2026-07-11T00:00:00Z' }, aggregate([rec('baseline', 0.75, 110, 55), rec('advised', 0.7, 380, 70)]), []);
+  const out = diffReports(a, b);
+  assert.match(out, /baseline\s+0\.50 → 0\.75\s+\+0\.25/);
+  assert.match(out, /advised\s+0\.70 → 0\.70\s+±0\.00/);
+  assert.match(out, /2026-07-10T00:00:00Z/); // shows which run is which
+  assert.match(out, /2026-07-11T00:00:00Z/);
+});
+
+test('diffReports: arms present in only one file are flagged, not dropped', () => {
+  const a = reportJson({}, aggregate([rec('baseline', 0.5, 100, 50)]), []);
+  const b = reportJson({}, aggregate([rec('baseline', 0.5, 100, 50), rec('verify', 0.9, 120, 60)]), []);
+  const out = diffReports(a, b);
+  assert.match(out, /verify\s+\(only in B\)/);
+});
+
+test('diffReports: ungraded arm shows token delta with score placeholder', () => {
+  const a = reportJson({}, aggregate([rec('baseline', null, 100, 50)]), []);
+  const b = reportJson({}, aggregate([rec('baseline', null, 200, 100)]), []);
+  const out = diffReports(a, b);
+  assert.match(out, /baseline\s+— → —/);
+  assert.match(out, /150 → 300/); // meanTotalTokens A → B
+});
+
 test('formatReport: shows ±stddev and warns on small n', () => {
   const recs = [
-    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
-    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1 },
+    { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },
+    { taskId: 't', mode: 'advised', score: 1.0, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },
   ];
   const out = formatReport(aggregate(recs));
   assert.match(out, /±0\.35/);

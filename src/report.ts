@@ -11,6 +11,9 @@ export interface RunRecord {
   cacheReadTokens: number;
   cacheCreationTokens: number;
   rounds: number;
+  // Estimated real dollars for the run (src/pricing.ts), null when any call in
+  // the run wasn't priceable. Tokens stay the primary metric; $ is derived.
+  costUsd: number | null;
 }
 
 export interface ArmStats {
@@ -32,6 +35,9 @@ export interface ArmStats {
   // between a 1-call arm and a 5-call arm. Excluding it (an earlier mistake)
   // made multi-call arms look almost free.
   meanTotalTokens: number;
+  // Mean estimated $ per run; null unless EVERY run in the arm was priced —
+  // a partial mean would silently understate the expensive runs (ROADMAP #13).
+  meanCostUsd: number | null;
 }
 
 const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -64,6 +70,7 @@ export function aggregate(records: RunRecord[]): ArmStats[] {
       meanCacheReadTokens: mean(rs.map((r) => r.cacheReadTokens)),
       meanCacheCreationTokens: mean(rs.map((r) => r.cacheCreationTokens)),
       meanTotalTokens: mean(rs.map((r) => r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens)),
+      meanCostUsd: rs.every((r) => r.costUsd !== null) ? mean(rs.map((r) => r.costUsd as number)) : null,
     });
   }
   return stats;
@@ -76,15 +83,16 @@ export function formatReport(stats: ArmStats[]): string {
 
   const lines: string[] = [];
   lines.push('=== quality × cost by arm ===');
-  lines.push(`${'arm'.padEnd(12)} ${'runs'.padStart(4)} ${'score'.padStart(11)} ${'in'.padStart(8)} ${'out'.padStart(8)} ${'cacheRd'.padStart(9)} ${'cacheCr'.padStart(9)} ${'total'.padStart(9)}`);
+  lines.push(`${'arm'.padEnd(12)} ${'runs'.padStart(4)} ${'score'.padStart(11)} ${'in'.padStart(8)} ${'out'.padStart(8)} ${'cacheRd'.padStart(9)} ${'cacheCr'.padStart(9)} ${'total'.padStart(9)} ${'$/task'.padStart(8)}`);
   for (const s of stats) {
     // mean ±stddev in the table; the min-max range stays in the JSON export
     const score =
       s.meanScore === null
         ? '—'
         : `${s.meanScore.toFixed(2)}${s.stddevScore !== null ? ` ±${s.stddevScore.toFixed(2)}` : ''}`;
+    const cost = s.meanCostUsd === null ? '—' : `$${s.meanCostUsd.toFixed(s.meanCostUsd >= 0.1 ? 2 : 4)}`;
     lines.push(
-      `${s.mode.padEnd(12)} ${String(s.runs).padStart(4)} ${score.padStart(11)} ${n0(s.meanInputTokens).padStart(8)} ${n0(s.meanOutputTokens).padStart(8)} ${n0(s.meanCacheReadTokens).padStart(9)} ${n0(s.meanCacheCreationTokens).padStart(9)} ${n0(s.meanTotalTokens).padStart(9)}`,
+      `${s.mode.padEnd(12)} ${String(s.runs).padStart(4)} ${score.padStart(11)} ${n0(s.meanInputTokens).padStart(8)} ${n0(s.meanOutputTokens).padStart(8)} ${n0(s.meanCacheReadTokens).padStart(9)} ${n0(s.meanCacheCreationTokens).padStart(9)} ${n0(s.meanTotalTokens).padStart(9)} ${cost.padStart(8)}`,
     );
   }
 
@@ -139,4 +147,40 @@ export interface ReportJson {
 }
 export function reportJson(meta: Record<string, unknown>, stats: ArmStats[], records: RunRecord[]): ReportJson {
   return { meta, stats, records };
+}
+
+// `loupe diff a.json b.json` — did my prompt/model change help? Compares two
+// `bench --out` bundles per arm: score and total-token movement (ROADMAP #8).
+export function diffReports(a: ReportJson, b: ReportJson): string {
+  const label = (r: ReportJson, name: string) =>
+    `${name}: ${typeof r.meta.generatedAt === 'string' ? r.meta.generatedAt : 'no timestamp'}${typeof r.meta.builder === 'string' ? ` (builder ${r.meta.builder})` : ''}`;
+  const byMode = (r: ReportJson) => new Map(r.stats.map((s) => [s.mode, s]));
+  const aStats = byMode(a);
+  const bStats = byMode(b);
+  const modes = [...new Set([...aStats.keys(), ...bStats.keys()])];
+
+  const score = (s: ArmStats | undefined) => (s?.meanScore == null ? '—' : s.meanScore.toFixed(2));
+  const lines: string[] = [];
+  lines.push('=== diff A → B ===');
+  lines.push(label(a, 'A'));
+  lines.push(label(b, 'B'));
+  lines.push('');
+  lines.push(`${'arm'.padEnd(12)} ${'score A → B'.padEnd(16)} ${'Δscore'.padStart(7)}   ${'tokens A → B'.padEnd(22)} ${'Δtokens'.padStart(8)}`);
+  for (const mode of modes) {
+    const sa = aStats.get(mode);
+    const sb = bStats.get(mode);
+    if (!sa || !sb) {
+      lines.push(`${mode.padEnd(12)} (only in ${sa ? 'A' : 'B'})`);
+      continue;
+    }
+    const dScore =
+      sa.meanScore != null && sb.meanScore != null
+        ? `${sb.meanScore - sa.meanScore >= 0 ? (sb.meanScore === sa.meanScore ? '±' : '+') : ''}${(sb.meanScore - sa.meanScore).toFixed(2)}`
+        : '—';
+    const dTok = sa.meanTotalTokens > 0 ? `${((sb.meanTotalTokens / sa.meanTotalTokens - 1) * 100).toFixed(0)}%` : '—';
+    lines.push(
+      `${mode.padEnd(12)} ${`${score(sa)} → ${score(sb)}`.padEnd(16)} ${dScore.padStart(7)}   ${`${n0(sa.meanTotalTokens)} → ${n0(sb.meanTotalTokens)}`.padEnd(22)} ${(dTok.startsWith('-') ? dTok : `+${dTok}`).padStart(8)}`,
+    );
+  }
+  return lines.join('\n');
 }
