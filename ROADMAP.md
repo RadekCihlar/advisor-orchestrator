@@ -1,9 +1,12 @@
-# loupe — Roadmap
+# loupe — Roadmap v2
+
+v1 shipped in full (2026-07-07 → 2026-07-12) — archived in
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md) §25–§28. Only #12 carried over.
 
 loupe's job: tell you whether a reviewer / verify loop is worth it for **your**
-tasks, across providers. This roadmap is ordered by **leverage** — correctness
-and usefulness first, polish later. Each item is tagged `[better]` (capability),
-`[cleaner]` (code/debt), or `[useful]` (product/adoption), with a rough effort.
+tasks, across providers. Ordered by leverage; every item tagged `[better]`
+(measurement quality), `[useful]` (product/adoption), or `[cleaner]` (debt),
+with a rough effort (S/M/L).
 
 ## The finding loupe must protect (why it exists)
 
@@ -20,82 +23,75 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
 
 ---
 
-## Now — highest leverage, mostly small
+## Now — close the honesty gap
 
-1. **CI: test + typecheck on every push** `[cleaner]` · S — GitHub Actions running
-   `npm ci && npm run typecheck && npm test`. Locks in the green state. *(landed
-   alongside this roadmap.)*
+Everything here is shipped code the README currently has to hedge about.
+Closing these converts "written to spec" into "verified live".
 
-2. ✅ **DONE — neutralized ambient output-style contamination** `[better]` — the
-   spawned `claude-code` builder inherited the caller's user-global output style
-   and appended `★ Insight` prose that broke the `exec` grader and polluted
-   benchmarks. Fixed with `--setting-sources project,local` so the builder runs
-   vanilla; verified no `★` across live runs (design §23). `extractCode` stays as
-   a light safety net for ordinary markdown fences. The hook channel is closed
-   too: every call also passes `--settings` with `{"disableAllHooks":true}` —
-   measured in=3638→2 tokens, ~15x notional cost on a trivial prompt (design §24).
+1. **Live-verify `anthropic-api` / `openai-api` + the pricing table**
+   `[useful]` · S — one `loupe run` and one bench task per engine with a real
+   key; compare the `$` estimate against the provider's own usage numbers.
+   Blocked on: a key in the env.
 
-3. ✅ **DONE — real task packs** `[useful]` — shipped
-   `benchmark/packs/{coding,reasoning,constraint}.json`, all deterministic
-   graders (no judge cost), run via `bench --pack <name> [--task <id>]`. Every
-   pack task's grader is proven against a reference solution in
-   `src/packs.test.ts` — a failing grader is caught offline, keeping "headroom"
-   honest (design §25).
+2. **Exercise the GitHub Action from a caller workflow** `[useful]` · S — a
+   minimal repo that `uses: RadekCihlar/Loupe@master` with a pack + fail-under,
+   confirming inputs, key pass-through, and the gate's exit code. Blocked on:
+   repo public + master pushed + `ANTHROPIC_API_KEY` secret in the caller.
 
-4. ✅ **DONE — per-assertion `exec` scoring** `[better]` — each non-empty line
-   of `tests` runs as an independent check (LOUPE_SCORE harness); score =
-   fraction passing, and the *specific* failing assertions (with errors) are
-   the detail that `verify` mode feeds back to the builder (design §25).
+3. **Codex engine live** `[useful]` · S — run the existing `codex` engine
+   against a real CLI. Blocked on: codex not installed on the dev machine
+   (`npm i -g @openai/codex && codex login`).
 
-## Next
+## Next — sharper verdicts `[better]`
 
-5. **Direct-API engines (`anthropic-api`, `openai-api`)** `[useful]` · M — key-based
-   engines so loupe runs in CI/services without a provider CLI. Resolves the
-   "standalone but CLI-only" tension. Secrets via env only; `setup` detects keys.
+The report currently crowns the best mean. With n=3–5 that can be noise, and
+"best quality" can hide "second place at 40% of the cost". These make the
+verdict trustworthy — the quality core of v2.
 
-6. **Global install / `bin` + npm publish** `[useful]` · M — `loupe setup` /
-   `loupe run` instead of `npx tsx src/cli.ts`. Add a `bin` + a build/bundle step
-   so `npm i -g loupe` / `npx loupe` works.
+4. **Significance marker between arms** `[better]` · M — pairwise
+   overlap/effect-size hint next to the verdict ("advised +0.33 vs
+   self-review; stddevs overlap at this n — inconclusive, run ~N more
+   repeats"). Own math (CI overlap or Welch-style), no stats dependency. The
+   small-n warning was the v1 stub; this is the real thing.
 
-7. ✅ **DONE — statistical rigor** `[better]` — report shows mean ±stddev
-   (sample, n−1) per arm, warns when any graded arm has n<5; stddev rides the
-   `--out` JSON via `ArmStats.stddevScore` (design §25).
+5. **Cost-aware verdict** `[better]` · S — alongside "best quality", report
+   quality-per-cost and call out the cheapest arm within ε of the best score
+   ("self-review matches advised within 0.05 at 0.4× tokens"). Data already
+   exists (meanCostUsd, token totals) — this is a report change only.
 
-8. **Results history + diff** `[useful]` · M — `loupe diff a.json b.json`: did my
-   prompt/model change help? Timestamped result store.
+6. **A pack with headroom (`hard`)** `[better]` · M — current packs saturate:
+   a strong builder aces baseline and every arm ties at "no gain, higher
+   cost". Build a pack calibrated so a strong solo builder lands ~0.5–0.8
+   (edge-case-dense exec tasks, multi-constraint outputs), leaving room for
+   review to visibly help or not. Prove graders against reference solutions
+   like the v1 packs.
 
-9. **A reusable GitHub Action** `[useful]` · S — so teams gate prompt/model changes
-   with `bench --fail-under` on PRs.
+## Later — gated until something needs them
 
-## Later
+7. **Judge calibration** `[better]` · M — run the `judge` grader alongside
+   `exec` on the coding packs and report agreement. Answers "can I trust the
+   judge on tasks that can't be exec-graded?". Gate: someone actually using
+   judge-graded workloads.
 
-10. **Parallel bench** (bounded concurrency) `[better]` · S — wall-clock; bench is
-    sequential today.
-11. ✅ **DONE — §9 self-uncertainty marker** (`<<needs-review>>`) `[better]` —
-    escalated-mode builders are invited to append the marker when unsure; a
-    flagged round skips the self-review and spends the one escalation
-    immediately. Flag rate is visible per run in usage.jsonl (design §25).
-12. **Unwired config knobs from the design** `[better]` · M — `frequency:
-    on-low-confidence`, `consult_context: full-history`, `token_budget`/`saver`.
-    Build each only when a workload needs it (YAGNI).
-13. **Real-$ cost** `[useful]` · S — per-provider pricing table; show dollars beside
-    tokens, normalized for free/local vs metered.
+8. **Reviewer-matrix sweep** `[useful]` · L — `bench --matrix` over
+   builder×reviewer pairs to find the cheapest reviewer that still helps.
+   Gate: a real multi-candidate decision to make; until then it's #1/#5 run a
+   few times by hand.
+
+9. **Release automation** `[useful]` · S — `npm version` + tag → CI publish
+   with a granular npm token. Gate: publish cadence makes the manual passkey
+   step annoying (it isn't yet).
+
+10. **Unwired config knobs from the design** `[better]` · M — carried from v1:
+    `frequency: on-low-confidence`, `consult_context: full-history`,
+    `token_budget`/`saver`. Build each only when a workload needs it (YAGNI).
 
 ## Cleaner — tech-debt paydown
 
-- **Split `cli.ts`** `[cleaner]` · M — it holds dispatch + every command + prompts.
-  Extract `src/commands/{run,bench,setup,providers}.ts` behind a thin dispatcher;
-  smaller, more testable files.
-- **Split the 22-section `docs/design.md`** `[cleaner]` · S — into `ARCHITECTURE.md`
-  (current design) + `CHANGELOG.md` (history). It's a session log now. Trim the
-  pre-build spec that restates shipped interfaces (rot risk).
-- **End-to-end integration test** `[cleaner]` · S — one full `bench` run with an
-  injected fake engine. Unit tests cover the pieces, not the whole flow.
-- **Align Node version** `[cleaner]` · S — `engines: >=24` vs actually tested on 22;
-  pick one and document it.
-- **Replace `extractCode` heuristics** `[cleaner]` · S — once #2 fixes contamination
-  at the source, drop the whack-a-mole prose-stripping for a fence-preferred,
-  validated extractor.
+- **e2e coverage for `bench --parallel` quiet path** `[cleaner]` · S — the
+  pool is unit-tested and sequential bench is e2e-tested; the N>1 tagged-line
+  path is only smoke-tested. One test through the fake engine with
+  `--parallel 2`.
 
 ## Non-goals (for now)
 
@@ -105,5 +101,5 @@ per-workload measurement. If an item doesn't, it's probably a non-goal.
 
 ---
 
-*Contributions welcome: pick a `Now`/`Next` item, keep the test + typecheck green
-(`npm test && npm run typecheck`), and open a PR.*
+*Contributions welcome: pick a `Now`/`Next` item, keep the test + typecheck
+green (`npm test && npm run typecheck`), and open a PR.*

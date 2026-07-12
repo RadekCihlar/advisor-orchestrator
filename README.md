@@ -5,16 +5,13 @@
 # loupe
 
 [![ci](https://github.com/RadekCihlar/Loupe/actions/workflows/ci.yml/badge.svg)](https://github.com/RadekCihlar/Loupe/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40cihlarr%2Floupe)](https://www.npmjs.com/package/@cihlarr/loupe)
 
-**A builder + reviewer loop for LLMs — and a harness that tells you whether the review is actually worth it.**
+**One model builds, another takes a closer look — and loupe measures whether that second look is actually worth it.**
 
-One model does the work; another takes a closer look. loupe runs that loop across providers (Claude, Codex, local Ollama), with any model in either role, and — the part that matters — **measures** whether the second look improves quality, and at what token cost. More calls aren't free; a reviewer only earns its keep if it beats the cheaper option.
+"Add a reviewer model" sounds obviously good. Is it? More calls aren't free — a reviewer only earns its keep if it beats the cheaper option. loupe runs the builder → reviewer revision loop across providers (Claude, OpenAI, Codex CLI, local Ollama — any model in either role), grades every strategy on **your** tasks, and hands you a quality × cost verdict instead of vibes.
 
-> Not the built-in `advisor()` tool. loupe is standalone and scriptable — run it from a script, a CI job, or against your own task set. ([why not the native tool](docs/design.md#2-decision-fully-custom-orchestrator-no-native-advisor-tool-adr))
-
-## Why loupe
-
-"Add a reviewer model" sounds obviously good. Is it? loupe answers that **for your tasks**, with a quality×cost verdict instead of vibes. A real result it produced — weak local builder (`qwen2.5-coder:1.5b`) + `opus` reviewer, a truncation-rule coding task, n=3:
+A real result it produced — weak local builder (`qwen2.5-coder:1.5b`) + `opus` reviewer, a truncation-rule coding task, n=3:
 
 | arm | score | what happened |
 |---|---|---|
@@ -23,23 +20,31 @@ One model does the work; another takes a closer look. loupe runs that loop acros
 | **advised** (opus reviews) | **0.67** | a stronger reviewer fixed 2 of 3 |
 | verify (run the tests) | 0.33 | feeding the failing test back fixed 1 of 3 |
 
-Review helps **when the reviewer is stronger than the builder** — and self-review or one-shot escalation don't. (On tasks a strong model already nails, every review mode ties at "no gain, higher cost" — also worth knowing before you pay for it.) That's the call loupe makes measurable.
+Review helps **when the reviewer is stronger than the builder** — self-review can't rescue a weak model, and strong models on easy tasks gain nothing from review, just added cost. loupe turns that folklore into a per-workload measurement.
+
+## Install
+
+```sh
+npm i -g @cihlarr/loupe        # or one-off: npx @cihlarr/loupe <command>
+```
+
+Needs **Node ≥ 24** and at least one provider:
+
+- `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in the env — direct API, no CLI needed, works in CI and services
+- Claude Code CLI (`claude login`) · OpenAI Codex CLI (`codex login`) · [Ollama](https://ollama.com) running with a pulled model
+
+```sh
+loupe providers                # shows what's usable on your machine
+```
 
 ## Quickstart
 
 ```sh
-git clone <this repo> && cd loupe
-npm install
-npx tsx src/cli.ts setup            # detect providers, pick + verify, write loupe.config.json
-npx tsx src/cli.ts run "your task"  # auto-loads loupe.config.json — no flags needed
+loupe setup                    # pick builder + reviewer from detected providers, live-verify, save loupe.config.json
+loupe run "your task"          # runs the revision loop — auto-loads loupe.config.json, no flags needed
 ```
 
-`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks);
-`--json` puts one machine-readable JSON document on stdout (result, rounds,
-usage) with the human narration on stderr. Every completed run appends a line
-to `usage.jsonl` — a local run history.
-
-`setup` finds what's usable (Claude Code / Codex / Ollama), lets you pick the builder + reviewer, does a live test call to confirm, and saves it. After that, `run` and `bench` just work.
+`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks); `--json` puts one machine-readable JSON document on stdout with the human narration on stderr. Every completed run appends a line to `usage.jsonl` — a local run history.
 
 ## Modes
 
@@ -53,67 +58,68 @@ to `usage.jsonl` — a local run history.
 
 ## Engines — any, either role, mixable
 
-`claude-code` (Claude CLI) · `codex` (OpenAI Codex CLI) · `local` (Ollama). Cross-provider is fine: Claude builds, Codex reviews, whatever you like. `npx tsx src/cli.ts providers` shows what's usable on your machine.
+`anthropic-api` / `openai-api` (direct HTTP, key from env) · `claude-code` (Claude CLI, subscription auth) · `codex` (OpenAI Codex CLI) · `local` (Ollama, free). Cross-provider is fine: Claude builds, a local model reviews, whatever you like.
 
 ## Benchmark + verdict
 
 ```sh
-npx tsx src/cli.ts bench --pack coding --repeat 5 --out results.json --fail-under 0.8
-npx tsx src/cli.ts bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one task
+loupe bench --pack coding --repeat 5 --out results.json --fail-under 0.8
+loupe bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one task
 ```
 
-Grades every arm, prints a quality×cost table (mean ±stddev per arm, with a
-warning when n is too small to conclude) + verdict, saves the full data to
-JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear
-your bar (a CI quality gate).
+Grades every arm, prints a quality × cost table (mean ±stddev per arm, `$`/task where priceable, a warning when n is too small to conclude) + verdict, saves the full data to JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear your bar.
 
-Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`,
-`constraint` — all deterministic graders, each proven against a reference
-solution in `src/packs.test.ts`. Point `--tasks` at your own workload to learn
-which mode wins for *it*.
+Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`, `constraint` — all deterministic graders, each proven against a reference solution offline. Point `--tasks` at your own workload to learn which mode wins for *it*.
 
 Graders per task:
 
 - `includes` / `regex` — deterministic checks for known answers or hard constraints.
 - `judge` — an LLM scores against a rubric (use an independent `--judge-engine` to avoid self-bias).
-- `exec` — run the code against tests. Ground truth, no LLM-judge confound. Any task with an `exec` grader also gets a **`verify`** arm. Each non-empty line of `tests` is one self-contained check: score = fraction passing, and the failing lines are the feedback `verify` mode sends back to the builder.
+- `exec` — run the code against tests. Ground truth, no LLM-judge confound. Each non-empty line of `tests` is one self-contained check: score = fraction passing, and the failing lines are the feedback `verify` mode sends back to the builder. Any task with an `exec` grader also gets a **`verify`** arm.
+
+Compare two saved runs — did a prompt/model/config change help?
+
+```sh
+loupe diff before.json after.json   # per-arm Δscore + Δtokens
+```
+
+### CI gate (GitHub Action)
+
+This repo is also a composite action — gate PRs on a quality bar:
+
+```yaml
+- uses: RadekCihlar/Loupe@master
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  with:
+    tasks: benchmark/my-tasks.json   # or pack: coding
+    fail-under: '0.8'
+```
+
+Defaults to the key-based `anthropic-api` engine for both roles (CI has no provider CLIs); see [`action.yml`](action.yml) for all inputs.
 
 ## Claude Code plugin
 
-This repo doubles as a Claude Code plugin: a SessionStart hook teaches every
-session to delegate write-then-judge asks ("have opus write it, let ollama
-judge it", "second opinion from a cheaper model") to the loupe CLI instead of
-hand-rolling API calls — and to report rounds, verdicts, and tokens back.
-`/loupe` carries the full recipe table.
+This repo doubles as a Claude Code plugin: a SessionStart hook teaches every session to delegate write-then-judge asks ("have opus write it, let ollama judge it", "second opinion from a cheaper model") to the loupe CLI instead of hand-rolling API calls — and to report rounds, verdicts, and tokens back. `/loupe` carries the full recipe table.
 
 ```sh
-claude plugin marketplace add <path-or-git-url-of-this-repo>
+claude plugin marketplace add RadekCihlar/Loupe
 claude plugin install loupe@loupe
 ```
 
 ## Develop
 
 ```sh
-npm test            # unit tests, no network
-npm run typecheck   # tsc --noEmit
+git clone https://github.com/RadekCihlar/Loupe && cd Loupe
+npm install
+npm test                       # unit + end-to-end pipeline tests, no network
+npm run typecheck
+npx tsx src/cli.ts <command>   # run from source
 ```
-
-## Requirements
-
-- Node ≥ 24
-- At least one provider (check with `npx tsx src/cli.ts providers`):
-  - Claude Code CLI — installed + `claude login`
-  - OpenAI Codex CLI — installed + `codex login`
-  - [Ollama](https://ollama.com) — running, with a pulled model
 
 ## Status & honest limits
 
-Works end-to-end, verified live: multi-provider, per-assertion exec grading, the verify loop, real error handling, reproducible verdicts, 77 unit tests + a clean typecheck. Known limits: `judge` grading needs an independent model to avoid self-enhancement bias; the `codex` engine is written to the published spec but not yet run against an installed codex; direct-API (key-based) engines are a designed extension point, not built. Full design + build history: [`docs/design.md`](docs/design.md).
-
-## Roadmap
-
-Where loupe is headed — prioritized for better / cleaner / more useful:
-[`ROADMAP.md`](ROADMAP.md).
+Works end-to-end, verified live: multi-provider, per-assertion exec grading, the verify loop, real error handling, reproducible verdicts, 97 tests + a clean typecheck. Known limits: `judge` grading needs an independent model to avoid self-enhancement bias; the `codex` engine is written to the published spec but not yet run against an installed codex; the `anthropic-api`/`openai-api` engines are parse-tested against the published response shapes but not yet run against live keys; the `$` column comes from a pricing table that drifts (`src/pricing.ts`). Current design: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · build history: [`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 ## License
 
