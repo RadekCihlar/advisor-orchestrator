@@ -108,7 +108,9 @@ export async function cmdBench(flags: Flags): Promise<void> {
   // ROADMAP #10: --parallel N runs units concurrently (bounded). Default 1 =
   // sequential with today's full per-run output; N>1 switches to compact
   // tagged lines because interleaved full outputs are unreadable.
-  const parallel = Math.max(1, Math.trunc(Number(flags.parallel ?? 1)) || 1);
+  // intFlag (not a silent Number fallback): a typo'd value must error loudly
+  // like every other numeric flag, not quietly run sequentially.
+  const parallel = Math.max(1, intFlag(flags, 'parallel', 1));
   const quiet = parallel > 1;
 
   interface BenchUnit {
@@ -207,7 +209,9 @@ export async function cmdBench(flags: Flags): Promise<void> {
   // CI quality gate: fail if even the best arm can't clear the bar.
   if (typeof flags['fail-under'] === 'string') {
     const bar = Number(flags['fail-under']);
-    if (!Number.isFinite(bar)) {
+    if (!Number.isFinite(bar) || bar < 0 || bar > 1) {
+      // Out-of-range bars fail silently in the worst way: >1 can never pass,
+      // <0 always passes — both make the CI gate meaningless.
       console.error(`Error: --fail-under must be a number 0..1 (got "${flags['fail-under']}")`);
       process.exit(1);
     }

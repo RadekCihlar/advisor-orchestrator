@@ -125,6 +125,13 @@ test('diffReports: ungraded arm shows token delta with score placeholder', () =>
   assert.match(out, /150 → 300/); // meanTotalTokens A → B
 });
 
+test('diffReports: zero tokens in A shows bare — placeholder, not "+—"', () => {
+  const a = reportJson({}, aggregate([rec('baseline', null, 0, 0)]), []);
+  const b = reportJson({}, aggregate([rec('baseline', null, 200, 100)]), []);
+  const out = diffReports(a, b);
+  assert.doesNotMatch(out, /\+—/);
+});
+
 test('formatReport: shows ±stddev and warns on small n', () => {
   const recs = [
     { taskId: 't', mode: 'advised', score: 0.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0, rounds: 1, costUsd: null },

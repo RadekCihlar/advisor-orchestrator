@@ -23,6 +23,13 @@ export async function cmdRun(flags: Flags, positional: string[]): Promise<void> 
     console.error(`Error: unknown mode "${mode}". Known: ${MODES.join(', ')}`);
     process.exit(1);
   }
+  if (mode === 'verify') {
+    // `run` never wires a verifier (only bench does, from a task's exec
+    // grader), so verify mode here would silently ship round 0 as "approved"
+    // without checking anything.
+    console.error('Error: verify mode needs an exec-graded task file — use `bench` (e.g. --pack coding). `run` has no tests to run.');
+    process.exit(1);
+  }
   const consults = intFlag(flags, 'consults', cfg.consults ?? 2);
 
   // Fail fast on an explicitly-named engine that doesn't exist.

@@ -29,8 +29,10 @@ const anthropic = (inPerM: number, outPerM: number): Price => ({
   cacheCreatePerM: inPerM * 1.25,
 });
 
-// Longest-substring match against the model string, so aliases and dated
-// snapshots ("claude-opus-4-8", "claude-opus-4-5-20251101") hit the same row.
+// FIRST match in table order wins (Array.find) — keep more-specific rows
+// above generic ones (e.g. "fable-5" before any hypothetical bare "claude").
+// Substring match so aliases and dated snapshots ("claude-opus-4-8",
+// "claude-opus-4-5-20251101") hit the same row.
 const TABLE: Array<{ engine: string; match: string; price: Price }> = [
   { engine: 'anthropic-api', match: 'fable-5', price: anthropic(10, 50) },
   { engine: 'anthropic-api', match: 'opus', price: anthropic(5, 25) },

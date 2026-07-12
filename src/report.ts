@@ -178,8 +178,9 @@ export function diffReports(a: ReportJson, b: ReportJson): string {
         ? `${sb.meanScore - sa.meanScore >= 0 ? (sb.meanScore === sa.meanScore ? '±' : '+') : ''}${(sb.meanScore - sa.meanScore).toFixed(2)}`
         : '—';
     const dTok = sa.meanTotalTokens > 0 ? `${((sb.meanTotalTokens / sa.meanTotalTokens - 1) * 100).toFixed(0)}%` : '—';
+    const dTokSigned = dTok === '—' || dTok.startsWith('-') ? dTok : `+${dTok}`;
     lines.push(
-      `${mode.padEnd(12)} ${`${score(sa)} → ${score(sb)}`.padEnd(16)} ${dScore.padStart(7)}   ${`${n0(sa.meanTotalTokens)} → ${n0(sb.meanTotalTokens)}`.padEnd(22)} ${(dTok.startsWith('-') ? dTok : `+${dTok}`).padStart(8)}`,
+      `${mode.padEnd(12)} ${`${score(sa)} → ${score(sb)}`.padEnd(16)} ${dScore.padStart(7)}   ${`${n0(sa.meanTotalTokens)} → ${n0(sb.meanTotalTokens)}`.padEnd(22)} ${dTokSigned.padStart(8)}`,
     );
   }
   return lines.join('\n');

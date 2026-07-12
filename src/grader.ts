@@ -120,7 +120,8 @@ for (const _f of _failures.slice(0, 3)) console.log('LOUPE_FAIL ' + _f);
 // sandbox filesystem / network / syscalls. For untrusted inputs at scale, run
 // the whole benchmark inside a container/VM. Fine for a benchmark you launch.
 async function runProgram(language: 'python' | 'node', program: string, timeoutMs: number): Promise<GradeResult> {
-  const interp = language === 'python' ? 'python3' : 'node';
+  // Windows installs expose `python`, not `python3` (which ENOENTs there).
+  const interp = language === 'python' ? (process.platform === 'win32' ? 'python' : 'python3') : 'node';
   const filename = language === 'python' ? 'prog.py' : 'prog.js';
   const dir = await mkdtemp(join(tmpdir(), 'loupe-exec-'));
   try {
