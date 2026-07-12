@@ -17,6 +17,14 @@ From real runs this project already produced:
 - **Self-review can't rescue a weak model** — it can't catch its own bug.
 - **Strong models on easy tasks gain nothing** from review — pure added cost.
 - **`verify` (run the tests) is the cheapest reliable check for code.**
+- **A too-weak reviewer is worse than no reviewer** (live 2026-07-12):
+  qwen2.5:3B APPROVED 0.5b-built code that crashes on its first call, while
+  codex rejected it every round with concrete reasons. A rubber-stamp converts
+  broken output into *approved* broken output.
+- **A too-weak builder can't execute the fixes it can describe** (live
+  2026-07-12): 0.5b re-shipped byte-identical broken code with a fabricated
+  changelog claiming the reviewer's fixes were applied. Feedback quality
+  doesn't matter below the builder's capability floor.
 
 Every roadmap item should sharpen loupe's ability to turn that folklore into a
 per-workload measurement. If an item doesn't, it's probably a non-goal.
@@ -42,9 +50,13 @@ Closing these converts "written to spec" into "verified live".
    pass-through via `env:` (needs an `ANTHROPIC_API_KEY` secret — folds into
    #1) (design §28).
 
-3. **Codex engine live** `[useful]` · S — run the existing `codex` engine
-   against a real CLI. Blocked on: codex not installed on the dev machine
-   (`npm i -g @openai/codex && codex login`).
+3. ✅ **DONE — Codex engine live** `[useful]` — codex-cli 0.144.1 run live
+   2026-07-12. Two spawning bugs found and fixed (the parser held): execFile's
+   open stdin pipe hung codex indefinitely → shared `runBin` spawn helper
+   (`src/engines/spawn.ts`, also adopted by claude-code, killing its ~3s/call
+   stdin wait); ChatGPT-subscription auth 400s on every explicit `-m` → model
+   `'auto'` default omits the flag. Five live cross-provider runs completed
+   (codex reviewer × local/claude builders) — see CHANGELOG §29.
 
 ## Next — sharper verdicts `[better]`
 
@@ -69,6 +81,15 @@ verdict trustworthy — the quality core of v2.
    (edge-case-dense exec tasks, multi-constraint outputs), leaving room for
    review to visibly help or not. Prove graders against reference solutions
    like the v1 packs.
+
+11. **Reviewer catch-rate probe** `[better]` · S–M — born from the 2026-07-12
+    finding above: before trusting an advised verdict, measure whether the
+    reviewer actually catches defects. Feed it K outputs with known planted
+    bugs (derivable from pack reference solutions) plus K correct ones; report
+    catch rate + false-alarm rate. A reviewer below ~chance gets a loud
+    "rubber-stamp — worse than baseline" warning in the bench report. This is
+    the cheapest guard against the worst failure mode loupe has observed:
+    confidently approved broken code.
 
 ## Later — gated until something needs them
 

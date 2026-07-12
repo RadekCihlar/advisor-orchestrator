@@ -2,32 +2,55 @@
 // codex's own login (ChatGPT subscription) or OPENAI_API_KEY — no key stored by
 // us. Mirrors the claude-code engine's shape.
 //
-// Flags (from the Codex CLI docs, 2026-07):
+// Flags (verified against codex-cli 0.144.1, 2026-07-12):
 //   exec                 non-interactive subcommand
 //   --json               newline-delimited JSON (JSONL) event stream on stdout
 //   -m <model>           model override
 //   -s read-only         read-only sandbox — prevents file writes (codex's
 //                        analog of claude's `--tools ""`; it defaults to
 //                        read-only but we set it explicitly)
-//   -a never             never pause for approval (required for headless)
 //   --skip-git-repo-check allow running outside a git repo
 //   --ephemeral          don't persist session files
+//   --ignore-user-config don't load ~/.codex/config.toml (auth still works) —
+//                        codex's analog of claude's --setting-sources: user
+//                        config must not skew benchmark arms
+// (`-a never` was removed upstream — exec no longer takes an approval flag.)
 //
-// NEEDS LIVE VERIFICATION: codex is not installed on the machine this was
-// written on, and CLI event schemas drift. Before trusting benchmark numbers,
-// run one real `codex exec --json` and confirm the event/field names parsed
-// below (item.completed/agent_message, turn.completed.usage) still match. The
-// parser is exported and unit-tested against captured-shape fixtures.
+// LIVE-VERIFIED 2026-07-12 (ChatGPT-subscription auth): any explicit `-m`
+// value — including the exact model name from the user's own config.toml
+// default — gets "Model metadata for `X` not found... fallback metadata" then
+// a 400 "not supported when using Codex with a ChatGPT account." Omitting -m
+// entirely works (server picks the account's default). Root cause is in
+// codex-cli's local model-metadata table, not this code. Model 'auto' is the
+// escape hatch: skip -m and let codex choose. Real model names presumably
+// still work under OPENAI_API_KEY auth (untested here) — kept as an option.
 
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { runBin } from './spawn.js';
 import type { CallResult, DetectResult, Engine } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-// ponytail: bare name resolves via PATH. If Windows shim issues surface (as they
-// did for claude.cmd), mirror claude-code.ts's CLAUDE_CODE_EXECPATH handling.
-const CODEX_BIN = 'codex';
+// Windows npm installs `codex` as a .cmd shim, which spawn() can't launch bare
+// (ENOENT — found live, design §28). Same story as claude.cmd: prefer the real
+// .exe the npm package vendors so argv escaping works without a shell; fall
+// back to the .cmd shim with shell:true (which mangles multi-word prompts —
+// last resort only).
+function resolveCodexBin(): { bin: string; needsShell: boolean } {
+  if (process.platform === 'win32') {
+    const npmExe = join(
+      process.env.APPDATA ?? '', 'npm', 'node_modules', '@openai', 'codex',
+      'node_modules', '@openai', 'codex-win32-x64', 'vendor', 'x86_64-pc-windows-msvc', 'bin', 'codex.exe',
+    );
+    if (existsSync(npmExe)) return { bin: npmExe, needsShell: false };
+    return { bin: 'codex.cmd', needsShell: true };
+  }
+  return { bin: 'codex', needsShell: false };
+}
+const { bin: CODEX_BIN, needsShell: NEEDS_SHELL } = resolveCodexBin();
 
 // Parse codex exec's JSONL event stream into a CallResult, or throw a
 // descriptive error on a failure event. Exported for unit testing.
@@ -72,31 +95,22 @@ export function parseCodexOutput(stdout: string): CallResult {
 }
 
 async function callCodex(model: string, prompt: string): Promise<CallResult> {
-  try {
-    const { stdout } = await execFileAsync(
-      CODEX_BIN,
-      ['exec', '--json', '-m', model, '-s', 'read-only', '-a', 'never', '--skip-git-repo-check', '--ephemeral', prompt],
-      { maxBuffer: 10 * 1024 * 1024 },
-    );
-    return parseCodexOutput(stdout);
-  } catch (err) {
-    // Like claude, codex may exit non-zero yet still stream events to stdout;
-    // re-parse to surface the real reason instead of "Command failed".
-    const out = (err as { stdout?: string }).stdout;
-    if (out) {
-      try {
-        return parseCodexOutput(out);
-      } catch (parsed) {
-        if (parsed instanceof Error && parsed.message.startsWith('codex exec error')) throw parsed;
-      }
-    }
-    throw err;
-  }
+  const modelArgs = model === 'auto' ? [] : ['-m', model];
+  // runBin (not execFile): codex blocks forever on an open stdin pipe — see
+  // spawn.ts. codex may also exit non-zero yet still have streamed events to
+  // stdout (a turn.failed/error event) — parseCodexOutput surfaces that real
+  // reason regardless of exit code, so the code itself doesn't need branching.
+  const { stdout } = await runBin(
+    CODEX_BIN,
+    ['exec', '--json', ...modelArgs, '-s', 'read-only', '--skip-git-repo-check', '--ephemeral', '--ignore-user-config', prompt],
+    NEEDS_SHELL,
+  );
+  return parseCodexOutput(stdout);
 }
 
 async function detect(): Promise<DetectResult> {
   try {
-    await execFileAsync(CODEX_BIN, ['--version']);
+    await execFileAsync(CODEX_BIN, ['--version'], { shell: NEEDS_SHELL });
     return { available: true, detail: 'codex on PATH' };
   } catch {
     return { available: false, detail: 'not installed' };
@@ -107,5 +121,5 @@ export const codexEngine: Engine = {
   name: 'codex',
   detect,
   call: callCodex,
-  defaultModels: { builder: 'gpt-5-codex', reviewer: 'gpt-5-codex' }, // version-dependent constant
+  defaultModels: { builder: 'auto', reviewer: 'auto' }, // 'auto' skips -m; see live-verified note above
 };

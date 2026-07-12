@@ -523,3 +523,40 @@ propagates to the caller. Both green on the first dispatch (gate-pass 122s,
 gate-fail 11s). Untested until a key secret exists: `env:` key pass-through.
 Housekeeping: GitHub default branch switched `main` → `master` (`main` was a
 stale subset; every reference — badges, `uses:` — already said master).
+
+## 29. Codex engine live — two real bugs found, cross-provider matrix run (2026-07-12)
+
+**Roadmap v2 #3 closed.** codex-cli 0.144.1 installed (`codex login`, ChatGPT
+subscription) and the `codex` engine run live for the first time. The parser
+survived contact unchanged — both written-to-spec bugs were in *spawning*:
+
+- **stdin hang (indefinite).** `codex exec` always reads stdin for extra
+  context when it isn't a TTY ("Reading additional input from stdin..."), even
+  with the prompt passed as argv. execFile leaves the child's stdin an open
+  pipe with no EOF → codex blocked forever (observed 80+ min, twice). Fix:
+  shared `src/engines/spawn.ts` helper (`runBin`) — spawn + immediate
+  `stdin.end()`. claude-code.ts moved onto it too, which also killed its ~3s
+  per-call "no stdin data" wait (the old ponytail comment had misjudged that
+  as cosmetic — it was per-call latency on every claude call).
+- **`-m` rejected under ChatGPT auth.** ANY explicit model name — including
+  the account's own config.toml default — gets "Model metadata for X not
+  found" then a 400 "not supported when using Codex with a ChatGPT account".
+  Omitting `-m` works. Fix: engine default model is now `'auto'`, which skips
+  the flag; named models kept for API-key auth. `--ignore-user-config` added
+  so ~/.codex/config.toml can't skew arms (analog of claude's
+  --setting-sources). `-a never` dropped (removed upstream).
+
+**Live pairing matrix (advised mode, LRU-cache task):** sonnet→codex approved
+round 0 (correct, $0.075); qwen2.5:3B→codex approved round 1 after a real
+catch (capacity-0 KeyError); qwen2.5:0.5b→codex never approved in 4 rounds —
+the builder couldn't execute fixes it could describe, and round 3 shipped
+byte-identical code with a fabricated changelog claiming the fixes happened.
+codex critiques were concrete and correct every round. **New failure mode
+found: the too-weak reviewer.** qwen2.5:0.5b→qwen2.5:3B (local only) APPROVED
+round-0 code that crashes on its first cache hit (`self.cache.pop()` with no
+key → TypeError). A weak reviewer is worse than no reviewer: it converts
+broken output into *approved* broken output. Extends §22's "reviewer must be
+stronger than the builder" with a floor on the reviewer itself.
+
+**Verified:** 97/97 tests, clean typecheck, live smoke of both CLI engines
+through `runBin` (codex 2.7s, claude 4.4s round-trip), five full live runs.

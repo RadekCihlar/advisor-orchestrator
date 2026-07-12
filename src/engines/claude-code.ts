@@ -25,6 +25,7 @@ import { promisify } from 'node:util';
 import { writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runBin } from './spawn.js';
 import type { CallResult, DetectResult, Engine } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -97,38 +98,30 @@ export function parseClaudeResult(stdout: string): CallResult {
 }
 
 export async function callClaudeCode(model: string, prompt: string): Promise<CallResult> {
+  // runBin (not execFile) closes stdin up front — execFile's open stdin pipe
+  // cost a ~3s "no stdin data" wait on EVERY call (and hangs codex outright;
+  // see spawn.ts). claude writes its result JSON to stdout whether it exits 0
+  // or non-zero (is_error:true for e.g. an upstream 429), so parse stdout
+  // regardless of exit code — parseClaudeResult surfaces the descriptive
+  // error ("claude -p error (429): Quota exceeded ...") either way.
+  const { stdout, stderr, code } = await runBin(
+    CLAUDE_BIN,
+    // --setting-sources project,local drops the caller's USER-global settings
+    // (notably the output style) so the spawned model runs vanilla. Without it,
+    // an "Explanatory"-styled caller makes the builder append `★ Insight` prose
+    // that pollutes benchmarks and breaks the exec grader. Deterministic fix at
+    // the source — beats hoping a prompt instruction is obeyed. --settings
+    // SETTINGS_PATH closes the complementary hook channel (see above) —
+    // project/local hooks would still fire without it.
+    ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', '', '--setting-sources', 'project,local', '--settings', SETTINGS_PATH],
+    NEEDS_SHELL,
+  );
   try {
-    const { stdout } = await execFileAsync(
-      CLAUDE_BIN,
-      // --setting-sources project,local drops the caller's USER-global settings
-      // (notably the output style) so the spawned model runs vanilla. Without it,
-      // an "Explanatory"-styled caller makes the builder append `★ Insight` prose
-      // that pollutes benchmarks and breaks the exec grader. Deterministic fix at
-      // the source — beats hoping a prompt instruction is obeyed. --settings
-      // SETTINGS_PATH closes the complementary hook channel (see above) —
-      // project/local hooks would still fire without it.
-      ['-p', prompt, '--model', model, '--output-format', 'json', '--tools', '', '--setting-sources', 'project,local', '--settings', SETTINGS_PATH],
-      // ponytail: execFile leaves stdin open, so headless mode prints a ~3s
-      // "no stdin data" warning then proceeds. Truly closing stdin needs
-      // spawn + stdin.end(); not worth the rewrite for a cosmetic warning.
-      { maxBuffer: 10 * 1024 * 1024, shell: NEEDS_SHELL },
-    );
     return parseClaudeResult(stdout);
   } catch (err) {
-    // On an API error claude exits non-zero, so execFile rejects — but it has
-    // already written the error JSON to stdout. Re-parse it so the caller sees
-    // e.g. "claude -p error (429): Quota exceeded ..." instead of the generic
-    // "Command failed". Fall back to the original error if stdout isn't the
-    // expected JSON (a real spawn failure: ENOENT, etc).
-    const out = (err as { stdout?: string }).stdout;
-    if (out) {
-      try {
-        return parseClaudeResult(out);
-      } catch (parsed) {
-        if (parsed instanceof Error && parsed.message.startsWith('claude -p error')) throw parsed;
-      }
-    }
-    throw err;
+    if (err instanceof Error && err.message.startsWith('claude -p error')) throw err;
+    // stdout wasn't the expected JSON — a real launch/runtime failure.
+    throw new Error(`claude -p failed (exit ${code}): ${(stderr || stdout || 'no output').slice(0, 400)}`);
   }
 }
 
