@@ -2,6 +2,8 @@ import type { CallResult, DetectResult, Engine, EngineConfig } from './types.js'
 import { localEngine } from './local.js';
 import { claudeCodeEngine } from './claude-code.js';
 import { codexEngine } from './codex.js';
+import { anthropicApiEngine } from './anthropic-api.js';
+import { openaiApiEngine } from './openai-api.js';
 
 export * from './types.js';
 
@@ -12,6 +14,8 @@ const REGISTRY: Record<string, Engine> = {
   'claude-code': claudeCodeEngine,
   codex: codexEngine,
   local: localEngine,
+  'anthropic-api': anthropicApiEngine,
+  'openai-api': openaiApiEngine,
 };
 
 export const KNOWN_ENGINES: string[] = Object.keys(REGISTRY);
