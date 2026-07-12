@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "loupe",
+  "description": "Cross-model builder+reviewer loop: one model builds, another judges — and loupe measures whether the review was worth it.",
+  "owner": {
+    "name": "Radek Cihlář",
+    "url": "https://github.com/RadekCihlar"
+  },
+  "plugins": [
+    {
+      "name": "loupe",
+      "description": "Auto-delegates write-then-judge tasks across models (Claude builds, Ollama/Codex judges, any pairing) via the loupe CLI.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "loupe",
+  "version": "0.2.0",
+  "description": "Cross-model builder+reviewer loop. One model builds, another judges 'is it done?', loop until approved — Claude Code, Codex, or local Ollama in either role, no API key.",
+  "author": {
+    "name": "Radek Cihlář",
+    "url": "https://github.com/RadekCihlar"
+  }
+}
