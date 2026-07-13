@@ -10,6 +10,7 @@ export async function cmdSetup(): Promise<void> {
   for (const r of detected) console.log(`  ${r.name.padEnd(12)} ${r.available ? '✓' : '✗'}  ${r.detail}`);
   if (!detected.some((d) => d.available)) {
     console.error('\nNo providers usable yet. Set one up, then re-run `setup`:');
+    console.error('  - API key (no CLI): set ANTHROPIC_API_KEY or OPENAI_API_KEY in the env');
     console.error('  - Claude Code CLI:  install it, then `claude login`');
     console.error('  - OpenAI Codex CLI: install it, then `codex login`');
     console.error('  - Ollama:           https://ollama.com, then `ollama pull <model>`');
@@ -44,5 +45,5 @@ export async function cmdSetup(): Promise<void> {
   const config = { builder, reviewer, mode: 'advised' as Mode, consults: 2 };
   writeFileSync('loupe.config.json', JSON.stringify(config, null, 2) + '\n');
   console.log('\nWrote loupe.config.json — run/bench auto-load it. Now just:');
-  console.log('  npx tsx src/cli.ts run "your task here"');
+  console.log('  loupe run "your task here"');
 }

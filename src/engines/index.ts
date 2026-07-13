@@ -1,4 +1,4 @@
-import type { CallResult, DetectResult, Engine, EngineConfig } from './types.js';
+import type { CallOpts, CallResult, DetectResult, Engine, EngineConfig } from './types.js';
 import { localEngine } from './local.js';
 import { claudeCodeEngine } from './claude-code.js';
 import { codexEngine } from './codex.js';
@@ -44,8 +44,8 @@ export async function retryOnce<T>(fn: () => Promise<T>, label: string, delayMs 
   }
 }
 
-export async function call(cfg: EngineConfig, prompt: string): Promise<CallResult> {
-  return retryOnce(() => getEngine(cfg.engine).call(cfg.model, prompt), `call to ${cfg.engine}/${cfg.model}`);
+export async function call(cfg: EngineConfig, prompt: string, opts?: CallOpts): Promise<CallResult> {
+  return retryOnce(() => getEngine(cfg.engine).call(cfg.model, prompt, opts), `call to ${cfg.engine}/${cfg.model}`);
 }
 
 // Runs every registered engine's detect() concurrently — backs the `providers` command

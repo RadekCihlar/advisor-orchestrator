@@ -28,7 +28,7 @@ Review helps **when the reviewer is stronger than the builder** — self-review 
 npm i -g @cihlarr/loupe        # or one-off: npx @cihlarr/loupe <command>
 ```
 
-Needs **Node ≥ 24** and at least one provider:
+Needs **Node ≥ 20** and at least one provider:
 
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` in the env — direct API, no CLI needed, works in CI and services
 - Claude Code CLI (`claude login`) · OpenAI Codex CLI (`codex login`) · [Ollama](https://ollama.com) running with a pulled model
@@ -44,7 +44,33 @@ loupe setup                    # pick builder + reviewer from detected providers
 loupe run "your task"          # runs the revision loop — auto-loads loupe.config.json, no flags needed
 ```
 
-`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks); `--json` puts one machine-readable JSON document on stdout with the human narration on stderr. Every completed run appends a line to `usage.jsonl` — a local run history.
+`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks); `--json` puts one machine-readable JSON document on stdout with the human narration on stderr. Every completed run appends a line to `usage.jsonl` in the working directory (`LOUPE_LOG` overrides the path) — a local run history.
+
+What a run looks like (a real session, free local model in both roles):
+
+```text
+$ loupe run "Write a Python function dedupe(lst) that removes duplicates while
+  preserving order — it must handle unhashable elements like lists too." --lean
+
+builder: local/qwen2.5:3B -- reviewer: local/qwen2.5:3B [same model — self-review]
+  · round 0: builder local/qwen2.5:3B — 78 in / 321 out
+  · round 0: consulting reviewer local/qwen2.5:3B…
+  · round 0: reviewer critique: "The provided function dedupe has a good approach but…"
+  · round 1: builder local/qwen2.5:3B — 721 in / 261 out
+  · round 1: reviewer APPROVED — stopping early
+
+--- final output ---
+def dedupe(lst):
+    """Removes duplicates from lst, preserving first-occurrence order. …"""
+```
+
+Not sure which reviewer to pair with your builder? Let loupe decide:
+
+```sh
+loupe recommend --reviewers "codex/auto,local/qwen2.5:3b"
+```
+
+It probes each candidate with planted defects (rubber-stamps are eliminated — a reviewer that approves broken code must never win on price), benches the survivors against a no-reviewer baseline, and writes the cheapest trustworthy pick to `loupe.config.json` — or tells you straight that no reviewer earns its keep on your tasks.
 
 ## Modes
 
@@ -90,6 +116,12 @@ Compare two saved runs — did a prompt/model/config change help?
 ```sh
 loupe diff before.json after.json   # per-arm Δscore + Δtokens
 ```
+
+### Cheaper loops
+
+- **`--lean`** (run + bench): from round 1 on, re-reviews send the reviewer its own prior critique + a line-diff of the revision instead of the whole output, and cap runaway critiques before they re-enter the builder prompt. Round 0 is always the full prompt (what `probe` measures), verify-mode feedback is never touched, and each round falls back to the full prompt whenever the delta wouldn't actually be smaller — lean can only cut tokens, never add. Our own A/B (local 3B, coding pack, n=8/arm): **advised +0.07 score at −39% tokens**, but self-review dropped −0.30 — a weak model re-reviewing its own diff got worse, so lean stays opt-in. Prove it on *your* workload: `bench --out fat.json`, `bench --lean --out lean.json`, `loupe diff fat.json lean.json`.
+- **Prompt caching**: the `anthropic-api` engine marks the stable prompt prefix (the task statement, identical every round) `cache_control: ephemeral`, so multi-round runs re-read it at the provider's cache discount. No-op under the model's minimum cacheable length (~1k tokens) — short pack tasks won't cache, long real tasks will.
+- **Mode-level**: `escalated` already bounds the expensive reviewer to one call per run, and `verify` uses zero reviewer tokens.
 
 ### CI gate (GitHub Action)
 

@@ -8,9 +8,9 @@ import type { CallResult, DetectResult, Engine } from './types.js';
 
 const DEFAULT_HOST = 'http://localhost:11434';
 
-async function callLocal(model: string, prompt: string, host = DEFAULT_HOST): Promise<CallResult> {
+async function callLocal(model: string, prompt: string): Promise<CallResult> {
   // Bound the call so a hung Ollama can't stall a whole benchmark indefinitely.
-  const res = await fetch(`${host}/api/chat`, {
+  const res = await fetch(`${DEFAULT_HOST}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

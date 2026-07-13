@@ -58,7 +58,7 @@ export async function cmdRun(flags: Flags, positional: string[]): Promise<void> 
     const builder = await resolveDecision(rl, 'builder', plan.builder, detected);
     const reviewer =
       plan.reviewer.kind === 'mirror' ? builder : await resolveDecision(rl, 'reviewer', plan.reviewer, detected);
-    await runOne(task, mode, builder, reviewer, consults, undefined, flags.json === true);
+    await runOne(task, mode, builder, reviewer, consults, undefined, flags.json === true, flags.lean === true);
   } finally {
     rl?.close();
   }

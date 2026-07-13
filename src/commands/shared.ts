@@ -17,15 +17,18 @@ export type Flags = Record<string, string | true>;
 // src/commands → src → repo root. Same depth after the dist build
 // (dist/commands → dist → root), so packaged paths keep resolving.
 export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const LOG_PATH = join(repoRoot, 'usage.jsonl');
+// Usage history goes to the working directory (or $LOUPE_LOG), NOT the package
+// dir: a global npm install's package dir is buried in node_modules and often
+// not writable (root-owned on mac/linux) — every run would warn.
+const LOG_PATH = process.env.LOUPE_LOG ?? join(process.cwd(), 'usage.jsonl');
 
 export const USAGE = `Usage:
-  tsx src/cli.ts run "<task>" [--mode baseline|self-review|advised|escalated] [--consults N]
-    [--json] [--config path.json]
+  loupe run "<task>" [--mode baseline|self-review|advised|escalated] [--consults N]
+    [--json] [--lean] [--config path.json]
     "<task>" may be - to read the task from stdin (long/multiline tasks).
     --json: stdout carries one machine-readable JSON document (result, rounds,
     usage); human progress goes to stderr. Every completed run appends one
-    line to usage.jsonl (repo root).
+    line to usage.jsonl (working directory; override with $LOUPE_LOG).
     [--builder-engine <name>] [--builder-model X]
     [--reviewer-engine <name>] [--reviewer-model X]
     Precedence: built-in defaults < --config file < individual CLI flags.
@@ -33,16 +36,20 @@ export const USAGE = `Usage:
     Cross-provider is fine (e.g. builder claude-code, reviewer codex).
     escalated: cheap self-review every round; the bigger reviewer is called at
     most once per run (first time self-review isn't satisfied).
+    --lean: cheaper re-reviews — round ≥1 sends the reviewer its own prior
+    critique + a line-diff of the revision instead of the full output, and
+    caps runaway critiques. Round 0 and verify-mode feedback are untouched.
+    A/B it: bench --out fat.json, bench --lean --out lean.json, then diff.
 
-  tsx src/cli.ts setup
+  loupe setup
     Interactive first-run: detect providers, pick + verify builder/reviewer,
     and write loupe.config.json (auto-loaded by run/bench afterward).
 
-  tsx src/cli.ts providers
+  loupe providers
     List detected providers — which engines are usable on this machine.
 
-  tsx src/cli.ts bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json]
-    [--pack coding|reasoning|constraint|hard] [--task <id>] [--parallel N]
+  loupe bench [--consults N] [--repeat N] [--tasks path.json] [--config path.json]
+    [--pack coding|reasoning|constraint|hard] [--task <id>] [--parallel N] [--lean]
     --parallel N runs N units at once (compact tagged output; same-provider
     calls share rate limits). Default 1 = sequential, full per-run output.
     --pack <name> runs benchmark/packs/<name>.json; --task <id> runs one task.
@@ -50,6 +57,9 @@ export const USAGE = `Usage:
     [--builder-engine X] [--builder-model X] [--reviewer-engine X] [--reviewer-model X]
     [--judge-engine X] [--judge-model X]   (judge scores "judge" graders; make it
                                             INDEPENDENT of the arms to avoid bias)
+    [--reviewers "engine/model,engine/model"]  Matrix mode: sweep reviewer
+    candidates on the advised arm against a shared baseline control and pick
+    the cheapest reviewer within ε of the best — "which reviewer should I buy?".
     Runs a task file (default benchmark/tasks.json) through all 4 arms (baseline /
     self-review / advised / escalated), grades each output against the task's
     grader, and prints a quality×cost verdict. Warms the reviewer cache first.
@@ -57,14 +67,22 @@ export const USAGE = `Usage:
     directional, not statistically significant — raise --repeat for confidence.
     Task graders: { "type": "includes"|"regex"|"judge", ... } (see README).
 
-  tsx src/cli.ts probe [--reviewer-engine X] [--reviewer-model X] [--probe file.json]
+  loupe probe [--reviewer-engine X] [--reviewer-model X] [--probe file.json]
     Measure a reviewer's defect catch rate BEFORE trusting it in advised runs:
     feeds it known-defective + known-correct outputs (benchmark/probe.json by
     default, through the exact prompt real runs use) and reports catch rate,
     false-alarm rate, and a verdict. A rubber-stamp reviewer (approves planted
     defects) is worse than no reviewer — it launders broken output.
 
-  tsx src/cli.ts diff a.json b.json
+  loupe recommend --reviewers "engine/model,engine/model" [--pack coding] [--repeat N]
+    [--builder-engine X] [--builder-model X] [--force]
+    One command from candidates to a configured pairing: probe-gate the
+    candidates (rubber-stamps eliminated), mini-bench the survivors against a
+    baseline control, and write the cheapest trustworthy reviewer within ε of
+    the best to loupe.config.json — or report that no reviewer earns its keep.
+    --force overwrites an existing loupe.config.json.
+
+  loupe diff a.json b.json
     Compare two \`bench --out\` result files per arm — did my prompt/model/config
     change help? Shows score and total-token movement A → B.`;
 
@@ -194,6 +212,7 @@ export async function runOne(
   consults: number,
   verifier?: (output: string) => Promise<{ passed: boolean; feedback: string }>,
   json = false,
+  lean = false,
 ): Promise<RunResult> {
   const builderLabel = `builder: ${builder.engine}/${builder.model}`;
   const label =
@@ -208,7 +227,7 @@ export async function runOne(
   // in --json mode stdout carries ONLY the JSON document; humans read stderr
   (json ? console.error : console.log)(label);
 
-  const result = await run({ task, builder, reviewer, consults, mode, verifier });
+  const result = await run({ task, builder, reviewer, consults, mode, verifier, lean });
   logRun(task, result, builder, reviewer, consults);
   if (json) {
     console.log(JSON.stringify({ ...result, usage: tallyTokens(result) }));

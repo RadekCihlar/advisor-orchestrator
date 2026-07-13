@@ -88,6 +88,19 @@ verdict trustworthy — the quality core of v2.
     codex/auto → trustworthy (5/5, 0 false alarms); qwen2.5:0.5b →
     rubber-stamp (0/5) (2026-07-12).
 
+12. ✅ **DONE — Lean protocol + prompt caching** `[useful]` — `--lean`
+    (run + bench): round ≥1 re-reviews send prior critique + a line-diff of
+    the revision instead of the full output, with whole-prompt economy (send
+    whichever prompt is smaller — a live 3B run proved the delta can lose on
+    short outputs) and a 1500-char critique cap; round 0 and verify feedback
+    untouched. Plus `cache_control` on the stable task prefix for
+    anthropic-api via CallOpts metadata. A/B harness = existing
+    `bench --out` × `loupe diff`. Live-verified on local 3B (CHANGELOG §31,
+    2026-07-13). A/B on the coding pack (n=8/arm): advised +0.07 score at
+    −39% tokens, but self-review −0.30 (weak model re-reviewing its own diff)
+    with a ±0.10 noise floor — so lean STAYS opt-in; A/B your own workload
+    before flipping it on for self-review pairings.
+
 ## Later — gated until something needs them
 
 7. **Judge calibration** `[better]` · M — run the `judge` grader alongside
@@ -95,14 +108,22 @@ verdict trustworthy — the quality core of v2.
    judge on tasks that can't be exec-graded?". Gate: someone actually using
    judge-graded workloads.
 
-8. **Reviewer-matrix sweep** `[useful]` · L — `bench --matrix` over
-   builder×reviewer pairs to find the cheapest reviewer that still helps.
-   Gate: a real multi-candidate decision to make; until then it's #1/#5 run a
-   few times by hand.
+8. ✅ **DONE — Reviewer-matrix sweep + `recommend`** `[useful]` —
+   `bench --reviewers "engine/model,…"`: advised arm per candidate against a
+   shared baseline control, reported through the existing aggregate/verdict
+   machinery (arms labeled `advised@engine/model`), with a "Matrix pick"
+   line: cheapest reviewer within ε of the best — or none when baseline
+   matches them. Plus `loupe recommend`: probe-gates the candidates
+   (rubber-stamps eliminated so they can't win on price), mini-benches the
+   survivors, writes the pick to loupe.config.json (2026-07-13).
 
 9. **Release automation** `[useful]` · S — `npm version` + tag → CI publish
    with a granular npm token. Gate: publish cadence makes the manual passkey
    step annoying (it isn't yet).
+
+9b. **List the Action on the GitHub Marketplace** `[useful]` · S — branding
+    (icon/color) shipped in action.yml; the listing itself is a manual step:
+    draft a GitHub release and tick "Publish this Action to the Marketplace".
 
 10. **Unwired config knobs from the design** `[better]` · M — carried from v1:
     `frequency: on-low-confidence`, `consult_context: full-history`,

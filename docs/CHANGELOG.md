@@ -593,3 +593,78 @@ through `runBin` (codex 2.7s, claude 4.4s round-trip), five full live runs.
 
 **Verified:** 117/117 tests (was 98), clean typecheck, probe live-run against
 two real reviewers.
+
+## 31. Lean protocol + prompt caching — cheaper requests between models (2026-07-13)
+
+**Ask:** "have the request between models be cheaper" while keeping quality.
+Two layers shipped; call count was already covered (escalated / verify).
+
+- **`--lean` (run + bench).** Round ≥1 re-reviews send the reviewer its own
+  prior critique + a line-diff of the revision (new `src/textdiff.ts`, ~70
+  lines, LCS, zero deps) instead of the full output, and runaway critiques
+  are capped at 1500 chars before re-entering the builder prompt. Round 0
+  always uses the standard full prompt — so `probe` keeps measuring the real
+  thing — and verify-mode feedback (failing tests = ground truth) is never
+  capped. Opt-in; flip the default only after `bench --lean` A/Bs prove
+  quality parity per workload (`loupe diff fat.json lean.json` is the
+  harness, zero new report machinery).
+- **The guard that a live run forced.** First live A/B (local 3B, short
+  output): the delta prompt came out BIGGER than the standard one — 451 vs
+  291 reviewer tokens — because the echoed critique outweighed the diff
+  savings. Economy is therefore judged on the WHOLE prompt: build both,
+  send the shorter. Lean can only cut tokens, never add. Post-guard live
+  run confirmed the win where it should exist: round-1 reviewer 380 tokens
+  vs 440 at round 0, on a GROWN output, with approval on the revision.
+- **Prompt caching (`anthropic-api`).** The runner now tags every call with
+  the length of its stable prompt prefix (task statement — byte-identical
+  across a run's rounds); the anthropic-api engine splits it into a
+  `cache_control: ephemeral` block (`buildAnthropicBody`, exported +
+  parse-tested like the rest of that engine). Other engines ignore the
+  metadata; prompt stays one plain string everywhere — no interface churn
+  beyond an optional `CallOpts` third arg. No-op below the model's minimum
+  cacheable prefix (~1024 tokens): pack tasks won't cache, long real-world
+  tasks will. Live proof folds into ROADMAP #1 (needs a key).
+- Dropped `callLocal`'s dead `host` param (never passed by any caller) — it
+  collided with the new optional `CallOpts`.
+
+**Verified:** 133/133 tests (was 117), clean typecheck, three live lean runs
+on local qwen2.5:3B including one multi-round delta-path run.
+
+## 32. Ship-0.2.0 batch: first-run polish, reviewer matrix, `recommend`, lean A/B evidence (2026-07-13)
+
+Prompted by a user-journey audit ("check everything a user can see and have
+issues with") ahead of publishing 0.2.0.
+
+- **First-run polish.** `loupe help` and `setup`'s epilogue taught the dev
+  invocation (`tsx src/cli.ts …`) to npm users who have neither tsx nor src/ —
+  every USAGE line now says `loupe …`. `usage.jsonl` moved from the package
+  dir (root-owned for mac/linux global installs → a warning every run) to the
+  working directory, `$LOUPE_LOG` overrides. `setup`'s no-provider help now
+  lists the API-key route first. `engines` relaxed to `>=20` after checking
+  the runtime surface (fetch, AbortSignal.timeout, readline/promises — all
+  Node 18/20-era; nothing 24-only).
+- **`--lean` parse bug (same-day fix).** `--lean` wasn't registered as a
+  boolean flag, so `loupe run --lean "task"` swallowed the task as the flag's
+  value and silently disabled lean. Parser extracted to `src/cli-args.ts`
+  (importing cli.ts executes its entry point — untestable) + regression tests.
+- **Reviewer matrix (ROADMAP #8).** `bench --reviewers "engine/model,…"`:
+  advised arm per candidate vs a shared baseline control. Zero new report
+  machinery — RunRecord.mode was already a free-form string, so arms are
+  labeled `advised@engine/model` and aggregate/formatReport/significance all
+  just work. Ends with a "Matrix pick": cheapest reviewer within ε of the
+  best, or none when baseline matches them.
+- **`loupe recommend`.** One command from candidates to a configured pairing:
+  probe gate first (a rubber-stamp approves everything, which is both
+  top-quality-by-default and nearly free — it MUST be eliminated before cost
+  enters the picture), mini-bench the survivors, write the winner (or an
+  honest baseline config) to loupe.config.json; `--force` to overwrite.
+- **Lean A/B evidence (why lean stays opt-in).** coding pack, 3B self-pair,
+  n=8/arm: advised +0.07 score at −39% tokens; but baseline/verify (protocol-
+  invariant arms) moved ±0.10 — the noise floor — and self-review dropped
+  −0.30, beyond noise: a weak model re-reviewing its own diff does worse.
+  Default unchanged; README states the numbers.
+- **Reach.** action.yml got Marketplace branding (icon search / purple);
+  README got a real captured session transcript and the `recommend` pitch.
+
+**Verified:** full suite + typecheck (count in CI), live matrix + recommend
+runs on local models, lean A/B via two full bench runs + `loupe diff`.

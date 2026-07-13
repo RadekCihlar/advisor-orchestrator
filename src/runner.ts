@@ -1,4 +1,5 @@
 import { call, type EngineConfig, type CallResult } from './engines/index.js';
+import { lineDiff } from './textdiff.js';
 
 // Four arms, one benchmark question: does the SECOND MODEL help, beyond
 // what mere iteration would already buy you — and can we get that help for
@@ -34,6 +35,11 @@ export interface RunOptions {
   // feedback (e.g. test failures) fed back to the builder. Injected so the
   // runner stays engine/grader-agnostic and unit-testable.
   verifier?: (output: string) => Promise<{ passed: boolean; feedback: string }>;
+  // Lean protocol (--lean): round ≥1 re-reviews get the reviewer's own prior
+  // critique + a line-diff of the revision instead of the full output, and
+  // runaway critiques are capped before re-entering the builder prompt.
+  // Round 0 always uses the standard full prompt (what `probe` measures).
+  lean?: boolean;
 }
 
 export interface ConsultRound {
@@ -89,10 +95,29 @@ const firstLineOf = (text: string, max = 100) => {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 };
 
+// Prompt prefixes that stay byte-identical across a run's calls — their
+// lengths ride along as CallOpts.cachedPrefixLen so caching engines
+// (anthropic-api) can mark them cacheable. Other engines ignore it.
+const builderPrefix = (task: string): string => `Task: ${task}`;
+const reviewPrefix = (task: string): string => `You are reviewing another AI's work.\n\nTask: ${task}\n\nIts output:\n`;
+const leanReviewPrefix = (task: string): string =>
+  `You are re-reviewing another AI's work: you critiqued it and it has revised.\n\nTask: ${task}\n\n`;
+
 // Exported so the catch-rate probe (src/probe.ts) asks the reviewer EXACTLY
 // what real runs ask — a probe on a different prompt would measure nothing.
 export const reviewerPromptFor = (task: string, output: string): string =>
-  `You are reviewing another AI's work.\n\nTask: ${task}\n\nIts output:\n${output}\n\nGive a short, specific critique of concrete problems only. If it is already correct and complete, respond with exactly "APPROVED" and nothing else.`;
+  `${reviewPrefix(task)}${output}\n\nGive a short, specific critique of concrete problems only. If it is already correct and complete, respond with exactly "APPROVED" and nothing else.`;
+
+// Lean re-review (round ≥1): the reviewer saw the full output on round 0, so
+// its prior critique + the diff is complete information — like re-reading a
+// PR update. A reviewer that never approves rambles; the cap keeps one bad
+// critique from inflating every later prompt in the run.
+const CRITIQUE_CAP = 1500;
+const capCritique = (text: string): string =>
+  text.length <= CRITIQUE_CAP ? text : `${text.slice(0, CRITIQUE_CAP)}\n…[critique truncated]`;
+
+const leanReviewPromptFor = (task: string, critique: string, diff: string): string =>
+  `${leanReviewPrefix(task)}Your previous critique:\n${critique}\n\nWhat changed since the version you reviewed (- removed, + added, ··· separates hunks):\n${diff || '(no changes — the builder re-submitted the identical output)'}\n\nCheck whether your critique was addressed and whether the changes introduce new problems. List concrete problems as short numbered issues. If it is now correct and complete, respond with exactly "APPROVED" and nothing else.`;
 
 // callFn is injectable so the loop's control flow can be unit-tested without
 // spawning a real engine (see runner.test.ts). Production callers use the
@@ -103,19 +128,44 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
 
   let builderOutput = '';
   let feedback = '';
+  let prevOutput = ''; // lean: the version the reviewer last saw, for diffing
   let hasEscalated = false; // escalated mode: the bigger reviewer fires at most once per run
+
+  // Lean round ≥1: prior critique + line-diff of the revision. Falls back to
+  // the standard full prompt when there is no prior critique to anchor it
+  // (reviewer errored) or the delta prompt isn't actually smaller — the
+  // critique echo can outweigh the diff savings on short outputs (live-
+  // observed on local 3B), so economy is judged on the WHOLE prompt.
+  const reviewPromptForRound = (round: number): { prompt: string; reviewOpts: { cachedPrefixLen: number } } => {
+    const full = {
+      prompt: reviewerPromptFor(opts.task, builderOutput),
+      reviewOpts: { cachedPrefixLen: reviewPrefix(opts.task).length },
+    };
+    if (opts.lean && round > 0 && feedback) {
+      const diff = lineDiff(prevOutput, builderOutput);
+      if (diff !== null) {
+        const prompt = leanReviewPromptFor(opts.task, capCritique(feedback), diff);
+        if (prompt.length < full.prompt.length) {
+          return { prompt, reviewOpts: { cachedPrefixLen: leanReviewPrefix(opts.task).length } };
+        }
+      }
+    }
+    return full;
+  };
 
   for (let round = 0; round <= maxConsults; round++) {
     const marker = opts.mode === 'escalated' ? MARKER_INSTRUCTION : '';
+    // Verify-mode feedback is ground truth (failing tests) — never capped.
+    const fb = opts.lean && opts.mode !== 'verify' ? capCritique(feedback) : feedback;
     const builderPrompt =
       round === 0
         ? `Task: ${opts.task}${marker}`
-        : `Task: ${opts.task}\n\nYour previous attempt:\n${builderOutput}\n\nReviewer feedback:\n${feedback}\n\nRevise your attempt accordingly. Output only the revised attempt.${marker}`;
+        : `Task: ${opts.task}\n\nYour previous attempt:\n${builderOutput}\n\nReviewer feedback:\n${fb}\n\nRevise your attempt accordingly. Output only the revised attempt.${marker}`;
 
     // Builder failures propagate uncaught: with no builder pass this round,
     // there's nothing to ship, so the whole run legitimately fails here. The
     // caller (cli.ts bench loop) catches per-arm and moves to the next one.
-    const builderResult = await callFn(opts.builder, builderPrompt);
+    const builderResult = await callFn(opts.builder, builderPrompt, { cachedPrefixLen: builderPrefix(opts.task).length });
     const stripped = stripMarker(builderResult.text);
     builderOutput = stripped.text;
     note(`round ${round}: builder ${id(opts.builder)} — ${tok(builderResult)}`);
@@ -145,7 +195,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
           approved = true; // verify mode but no verifier wired — nothing to check
         }
       } else if (opts.mode === 'escalated') {
-        const prompt = reviewerPromptFor(opts.task, builderOutput);
+        const { prompt, reviewOpts } = reviewPromptForRound(round);
         let selfApproved = false;
         if (stripped.flagged && !hasEscalated) {
           note(`round ${round}: builder flagged ${UNCERTAINTY_MARKER} — skipping self-review, escalating directly`);
@@ -155,7 +205,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
           // i.e. it's treated as "self couldn't clear it, phone the big reviewer".
           note(`round ${round}: self-review by ${id(opts.builder)}…`);
           try {
-            selfReview = await callFn(opts.builder, prompt);
+            selfReview = await callFn(opts.builder, prompt, reviewOpts);
           } catch {
             selfReview = null;
           }
@@ -170,7 +220,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
           // First time self-review isn't satisfied → spend the one escalation.
           note(`round ${round}: self-review not satisfied — ESCALATING to ${id(opts.reviewer)} (once per run)…`);
           try {
-            reviewerResult = await callFn(opts.reviewer, prompt);
+            reviewerResult = await callFn(opts.reviewer, prompt, reviewOpts);
             feedback = reviewerResult.text;
             approved = isApproval(feedback);
             escalated = true;
@@ -195,10 +245,10 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
       } else {
         // advised / self-review: a single reviewer call every non-last round.
         // (self-review is just this with reviewer config == builder config.)
-        const prompt = reviewerPromptFor(opts.task, builderOutput);
+        const { prompt, reviewOpts } = reviewPromptForRound(round);
         note(`round ${round}: consulting reviewer ${id(opts.reviewer)}…`);
         try {
-          reviewerResult = await callFn(opts.reviewer, prompt);
+          reviewerResult = await callFn(opts.reviewer, prompt, reviewOpts);
           feedback = reviewerResult.text;
           approved = isApproval(feedback);
           note(
@@ -220,6 +270,7 @@ export async function run(opts: RunOptions, callFn: typeof call = call): Promise
     rounds.push({ round, builder: builderResult, reviewer: reviewerResult, selfReview, approved, flagged: stripped.flagged, escalated, verify, reviewerError });
 
     if (approved) break; // reviewer satisfied — stop early, don't burn remaining consults
+    prevOutput = builderOutput; // what this round's reviewer saw — next round diffs against it
   }
 
   return { mode: opts.mode, finalOutput: builderOutput, rounds };

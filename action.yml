@@ -13,6 +13,9 @@
 #       fail-under: '0.8'
 name: loupe bench
 description: Benchmark builder/reviewer arms on your task file and fail the job when the best arm scores below a quality bar.
+branding:
+  icon: search
+  color: purple
 inputs:
   tasks:
     description: Task file path in the caller repo (bench --tasks). Ignored when pack is set.

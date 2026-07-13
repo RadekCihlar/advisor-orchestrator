@@ -31,6 +31,8 @@ npx tsx "${CLAUDE_PLUGIN_ROOT}/src/cli.ts" run "<fully self-contained task>" --c
 - Report back: rounds, judge, verdict per round, token totals — the user wants to SEE the advising.
 - Never baseline mode for delegation (no judge). `--consults 3` for gnarly tasks.
 - `escalated` calls the bigger reviewer at most once per run. `setup` writes `loupe.config.json` (auto-loaded) if the user wants standing defaults.
+- Add `--lean` on multi-round advised runs to cut re-review tokens (round ≥1 sends the judge its prior critique + a diff instead of the full output). Skip it for self-review pairings — measured worse there.
+- Unsure which judge? `recommend --reviewers "codex/auto,local/<ollama>"` probe-gates candidates and writes the cheapest trustworthy pick to loupe.config.json.
 
 ## Checklist
 

@@ -31,10 +31,18 @@ export interface DetectResult {
   detail: string; // human-readable status: "claude on PATH (Vertex)", "not installed", "ollama: 3 model(s)"
 }
 
+// Optional per-call metadata. cachedPrefixLen marks how many leading chars of
+// the prompt are stable across calls in a run (the task statement): engines
+// that support prompt caching (anthropic-api) mark that prefix cacheable;
+// everyone else ignores it. The prompt itself stays one plain string.
+export interface CallOpts {
+  cachedPrefixLen?: number;
+}
+
 export interface Engine {
   name: string;
   detect(): Promise<DetectResult>;
-  call(model: string, prompt: string): Promise<CallResult>;
+  call(model: string, prompt: string, opts?: CallOpts): Promise<CallResult>;
   // Sensible per-role default models; empty when the provider has no universal
   // default (Ollama depends on what's pulled).
   defaultModels: { builder?: string; reviewer?: string };

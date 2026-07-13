@@ -8,6 +8,7 @@ import { aggregate, formatReport, reportJson, type RunRecord } from '../report.j
 import { estimateRunCostUsd } from '../pricing.js';
 import { runPool } from '../pool.js';
 import { tallyTokens } from '../usage.js';
+import { armLabelFor, parseReviewerSpecs, recommendFrom } from '../matrix.js';
 import { intFlag, loadConfigAuto, logRun, repoRoot, resolveDecision, roleInputFrom, runOne, type Flags } from './shared.js';
 
 export async function cmdBench(flags: Flags): Promise<void> {
@@ -65,6 +66,25 @@ export async function cmdBench(flags: Flags): Promise<void> {
   const benchBuilder = await resolveDecision(null, 'builder', plan.builder, detected);
   const benchReviewer = await resolveDecision(null, 'reviewer', plan.reviewer, detected);
 
+  // --reviewers "engine/model,engine/model": matrix mode (ROADMAP #8) — sweep
+  // reviewer candidates on the advised arm against a shared baseline control,
+  // to answer "which reviewer should I buy?" instead of "is this one worth it?".
+  let reviewerMatrix: EngineConfig[] | null = null;
+  if (typeof flags.reviewers === 'string') {
+    try {
+      reviewerMatrix = parseReviewerSpecs(flags.reviewers);
+    } catch (err) {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    for (const c of reviewerMatrix) {
+      if (!isKnownEngine(c.engine)) {
+        console.error(`Error: unknown engine in --reviewers: "${c.engine}". Known: ${KNOWN_ENGINES.join(', ')}`);
+        process.exit(1);
+      }
+    }
+  }
+
   // Judge engine for `judge` graders. Defaults to the reviewer; override with
   // --judge-engine/--judge-model to make it INDEPENDENT of the arms. A judge
   // that is also an arm's builder or reviewer inflates that arm's judge-graded
@@ -91,15 +111,17 @@ export async function cmdBench(flags: Flags): Promise<void> {
     `builder=${benchBuilder.engine}/${benchBuilder.model}  reviewer=${benchReviewer.engine}/${benchReviewer.model}  judge=${judgeEngine.engine}/${judgeEngine.model}\n`,
   );
 
-  // Warm the reviewer model's cache with one throwaway call BEFORE timing any
+  // Warm each reviewer model's cache with one throwaway call BEFORE timing any
   // arm, so the one-time cold-start tax (see claude-code.ts) lands here rather
   // than inflating task 1. Best-effort: a failed warm-up is logged, not fatal.
-  console.log(`Warming ${benchReviewer.engine}/${benchReviewer.model} cache (throwaway call)...`);
-  try {
-    await call(benchReviewer, 'Reply with exactly: OK');
-    console.log('  warm-up done.\n');
-  } catch (err) {
-    console.error(`  warm-up failed (non-fatal): ${err instanceof Error ? err.message : String(err)}\n`);
+  for (const r of reviewerMatrix ?? [benchReviewer]) {
+    console.log(`Warming ${r.engine}/${r.model} cache (throwaway call)...`);
+    try {
+      await call(r, 'Reply with exactly: OK');
+      console.log('  warm-up done.\n');
+    } catch (err) {
+      console.error(`  warm-up failed (non-fatal): ${err instanceof Error ? err.message : String(err)}\n`);
+    }
   }
 
   const baseModes: Mode[] = ['baseline', 'self-review', 'advised', 'escalated'];
@@ -112,11 +134,14 @@ export async function cmdBench(flags: Flags): Promise<void> {
   // like every other numeric flag, not quietly run sequentially.
   const parallel = Math.max(1, intFlag(flags, 'parallel', 1));
   const quiet = parallel > 1;
+  const lean = flags.lean === true; // lean protocol: delta re-reviews + capped critiques
 
   interface BenchUnit {
     t: (typeof tasks)[0];
     i: number;
     mode: Mode;
+    armLabel: string; // report key: the mode, or advised@engine/model in matrix runs
+    reviewer: EngineConfig;
     verifier?: (output: string) => Promise<{ passed: boolean; feedback: string }>;
   }
   const units: BenchUnit[] = [];
@@ -124,7 +149,6 @@ export async function cmdBench(flags: Flags): Promise<void> {
     // The verify arm only exists where a programmatic verifier does (exec
     // grader): its verifier reruns the task's tests and feeds failures back —
     // test result as BOTH the in-loop signal and (below) the scorer.
-    const taskModes: Mode[] = t.grader?.type === 'exec' ? [...baseModes, 'verify'] : baseModes;
     const verifier =
       t.grader?.type === 'exec'
         ? async (output: string) => {
@@ -133,25 +157,36 @@ export async function cmdBench(flags: Flags): Promise<void> {
           }
         : undefined;
     for (let i = 0; i < repeat; i++) {
-      for (const mode of taskModes) units.push({ t, i, mode, verifier });
+      if (reviewerMatrix) {
+        // Matrix: one shared baseline control + one advised arm per candidate.
+        // self-review/escalated/verify don't vary with the reviewer choice.
+        units.push({ t, i, mode: 'baseline', armLabel: 'baseline', reviewer: benchBuilder });
+        for (const cand of reviewerMatrix) {
+          units.push({ t, i, mode: 'advised', armLabel: armLabelFor(cand), reviewer: cand });
+        }
+      } else {
+        const taskModes: Mode[] = t.grader?.type === 'exec' ? [...baseModes, 'verify'] : baseModes;
+        for (const mode of taskModes) {
+          units.push({ t, i, mode, armLabel: mode, reviewer: mode === 'self-review' ? benchBuilder : benchReviewer, verifier });
+        }
+      }
     }
   }
   if (quiet) {
     console.log(`--parallel ${parallel}: ${units.length} runs, compact output. Same-provider calls share rate limits — dial back if you see 429s.\n`);
   }
 
-  await runPool(units, parallel, async ({ t, i, mode, verifier }) => {
+  await runPool(units, parallel, async ({ t, i, mode, armLabel, reviewer, verifier }) => {
     const builder = benchBuilder;
-    const reviewer = mode === 'self-review' ? builder : benchReviewer;
-    const tag = `task=${t.id} run=${i + 1} mode=${mode}`;
+    const tag = `task=${t.id} run=${i + 1} arm=${armLabel}`;
     if (!quiet) console.log(`\n### ${tag}`);
     try {
       let result: RunResult;
       if (quiet) {
-        result = await run({ task: t.prompt, builder, reviewer, consults, mode, verifier: mode === 'verify' ? verifier : undefined });
+        result = await run({ task: t.prompt, builder, reviewer, consults, mode, verifier: mode === 'verify' ? verifier : undefined, lean });
         logRun(t.prompt, result, builder, reviewer, consults);
       } else {
-        result = await runOne(t.prompt, mode, builder, reviewer, consults, mode === 'verify' ? verifier : undefined);
+        result = await runOne(t.prompt, mode, builder, reviewer, consults, mode === 'verify' ? verifier : undefined, false, lean);
       }
       const tally = tallyTokens(result);
       let score: number | null = null;
@@ -172,7 +207,7 @@ export async function cmdBench(flags: Flags): Promise<void> {
       }
       records.push({
         taskId: t.id,
-        mode,
+        mode: armLabel,
         score,
         inputTokens: tally.inputTokens,
         outputTokens: tally.outputTokens,
@@ -191,6 +226,15 @@ export async function cmdBench(flags: Flags): Promise<void> {
 
   const stats = aggregate(records);
   console.log('\n' + formatReport(stats));
+
+  if (reviewerMatrix) {
+    const rec = recommendFrom(stats);
+    console.log(
+      rec.kind === 'reviewer'
+        ? `\nMatrix pick: ${rec.reviewer.engine}/${rec.reviewer.model} — cheapest reviewer within ε of the best (score ${rec.arm.meanScore?.toFixed(2)}).`
+        : '\nMatrix pick: none — baseline matches every reviewer here; a reviewer does not earn its keep on these tasks.',
+    );
+  }
 
   if (typeof flags.out === 'string') {
     const meta = {

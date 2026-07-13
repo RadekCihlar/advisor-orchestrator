@@ -36,3 +36,33 @@ test('missing usage → null usage, empty content → empty text', () => {
   assert.equal(r.text, '');
   assert.equal(r.usage, null);
 });
+
+// --- request-body building: prompt caching (cache_control on the stable prefix) ---
+
+import { buildAnthropicBody } from './anthropic-api.js';
+
+test('no cachedPrefixLen → single plain-string user message (unchanged shape)', () => {
+  const body = buildAnthropicBody('m', 'Task: do it');
+  assert.deepEqual(body.messages, [{ role: 'user', content: 'Task: do it' }]);
+});
+
+test('cachedPrefixLen splits into two blocks, cache_control on the prefix', () => {
+  const prompt = 'Task: do it\n\nYour previous attempt:\nstuff';
+  const body = buildAnthropicBody('m', prompt, 'Task: do it'.length);
+  assert.deepEqual(body.messages, [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Task: do it', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: '\n\nYour previous attempt:\nstuff' },
+      ],
+    },
+  ]);
+});
+
+test('prefix = whole prompt → single fully-cached block; 0 → plain string', () => {
+  assert.deepEqual(buildAnthropicBody('m', 'abc', 0).messages, [{ role: 'user', content: 'abc' }]);
+  const whole = [{ role: 'user', content: [{ type: 'text', text: 'abc', cache_control: { type: 'ephemeral' } }] }];
+  assert.deepEqual(buildAnthropicBody('m', 'abc', 3).messages, whole);
+  assert.deepEqual(buildAnthropicBody('m', 'abc', 99).messages, whole);
+});
