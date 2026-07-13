@@ -82,8 +82,11 @@ export function formatReport(stats: ArmStats[]): string {
   if (stats.length === 0) return 'No runs to report.';
 
   const lines: string[] = [];
+  // Arm column sized to the longest label — matrix arms (advised@engine/model)
+  // overflow the old fixed 12 and shear every column after them.
+  const armW = Math.max(12, ...stats.map((s) => s.mode.length));
   lines.push('=== quality × cost by arm ===');
-  lines.push(`${'arm'.padEnd(12)} ${'runs'.padStart(4)} ${'score'.padStart(11)} ${'in'.padStart(8)} ${'out'.padStart(8)} ${'cacheRd'.padStart(9)} ${'cacheCr'.padStart(9)} ${'total'.padStart(9)} ${'$/task'.padStart(8)}`);
+  lines.push(`${'arm'.padEnd(armW)} ${'runs'.padStart(4)} ${'score'.padStart(11)} ${'in'.padStart(8)} ${'out'.padStart(8)} ${'cacheRd'.padStart(9)} ${'cacheCr'.padStart(9)} ${'total'.padStart(9)} ${'$/task'.padStart(8)}`);
   for (const s of stats) {
     // mean ±stddev in the table; the min-max range stays in the JSON export
     const score =
@@ -92,7 +95,7 @@ export function formatReport(stats: ArmStats[]): string {
         : `${s.meanScore.toFixed(2)}${s.stddevScore !== null ? ` ±${s.stddevScore.toFixed(2)}` : ''}`;
     const cost = s.meanCostUsd === null ? '—' : `$${s.meanCostUsd.toFixed(s.meanCostUsd >= 0.1 ? 2 : 4)}`;
     lines.push(
-      `${s.mode.padEnd(12)} ${String(s.runs).padStart(4)} ${score.padStart(11)} ${n0(s.meanInputTokens).padStart(8)} ${n0(s.meanOutputTokens).padStart(8)} ${n0(s.meanCacheReadTokens).padStart(9)} ${n0(s.meanCacheCreationTokens).padStart(9)} ${n0(s.meanTotalTokens).padStart(9)} ${cost.padStart(8)}`,
+      `${s.mode.padEnd(armW)} ${String(s.runs).padStart(4)} ${score.padStart(11)} ${n0(s.meanInputTokens).padStart(8)} ${n0(s.meanOutputTokens).padStart(8)} ${n0(s.meanCacheReadTokens).padStart(9)} ${n0(s.meanCacheCreationTokens).padStart(9)} ${n0(s.meanTotalTokens).padStart(9)} ${cost.padStart(8)}`,
     );
   }
 
