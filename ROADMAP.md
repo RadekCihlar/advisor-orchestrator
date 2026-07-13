@@ -78,6 +78,51 @@ From real runs this project already produced:
     Community reviewer-matrix knowledge ("who reviews whom well") grows from
     people pasting these. Gate: first real request for it.
 
+## Later — the level after that
+
+The three ideas that would genuinely raise the ceiling, in leverage order.
+Each is L-sized; none should start before someone actually needs it.
+
+20. **Tasks from your own repo** `[useful]` · L — the #1 adoption blocker is
+    "write a task file". Kill it: mine the user's repo for real tasks — a
+    function with co-located tests becomes an exec-graded task automatically
+    (prompt = signature + docstring + the file's context; grader = the real
+    tests). `loupe tasks from-repo src/` → a pack that IS your workload.
+    Nobody writes fixtures; the bench answers "which mode wins for the code
+    I actually write". Hard parts: test extraction per runner, context
+    self-containment, secrets hygiene when prompts quote repo code.
+
+21. **Pairing-evidence dataset + informed recommend** `[better]` · L —
+    loupe's measurements are throwaway-local today. Ship a small, versioned,
+    provenance-tagged dataset of pairing results (model × role × pack →
+    catch rate, score deltas) and let `recommend`/`probe` consult it as a
+    prior: "community data: ≤1b reviewers rubber-stamp (n=14) — skipping".
+    The network effect is the level jump — a caniuse for model pairings.
+    Gates: a submission-verification story (results must be reproducible),
+    and model-version drift handling. Without those it's misinformation.
+
+22. **Drift watch** `[useful]` · M — providers silently update models;
+    yesterday's verdict rots. `bench --baseline last.json`: run, diff, exit
+    non-zero on significant regression (paired read, same machinery) —
+    cron/CI recipe in the docs. Gate: first report of a pairing that
+    regressed in the wild.
+
+23. **Multiple-comparison guard in the matrix** `[better]` · S — sweeping k
+    reviewers inflates the false-positive rate of "the best one beats
+    baseline" (k chances to get lucky). Note it in the matrix verdict and
+    stiffen the threshold (Bonferroni-style t≥2 → t≥~2+ for k>3). Small,
+    keeps the sweep honest.
+
+## The cap — named
+
+After #20–#23 this niche is genuinely saturated. Everything beyond is a
+different product: multi-model committees and routing (agent-framework
+territory), hosted dashboards and trace stores (eval-platform territory —
+Braintrust/LangSmith already live there), or model leaderboards (research
+publishing, not tooling). loupe wins by being the sharpest possible answer
+to ONE question — "is this second model worth it, for my tasks, at what
+cost?" — and by refusing to become a platform around it.
+
 ## Carried from v2 — gates unchanged
 
 1. **Live-verify `anthropic-api` / `openai-api` + pricing** · S — one run +
