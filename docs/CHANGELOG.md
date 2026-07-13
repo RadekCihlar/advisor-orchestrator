@@ -705,3 +705,37 @@ integration.
 
 **Verified:** 161/161 tests, clean typecheck, MCP stdio smoke live, stats
 live on real history, --until-clear live on the reasoning pack.
+
+## 34. The level-after-that batch: repo miner, evidence priors, drift watch, comparison guard (2026-07-13)
+
+ROADMAP v3 #20–#23 — the four items past which this niche is saturated
+(ROADMAP names the cap explicitly).
+
+- **`loupe tasks from-repo` (#20, v1).** Kills the #1 adoption blocker
+  ("write a task file"): lifts literal-argument assertions from the repo's
+  own tests (assert.equal/deepEqual/ok/throws, expect().toBe/.toEqual) into
+  self-contained exec checks, attributes each to exactly ONE exported
+  function (composition or fixture references → skipped and reported, never
+  guessed), pairs them with the function's signature + JSDoc. Balanced-paren
+  scanning, not regex-only — string-safe. Dogfooded on loupe's own src:
+  mined parseJudgeScore (6 checks), isApproval (5), parseReviewerSpecs (2);
+  ground truth proven both ways (real implementations 1.0, mutated <1).
+- **Evidence priors (#21, v1).** benchmark/evidence.json ships four
+  provenance-tagged findings from live runs (sub-2B local reviewers
+  rubber-stamp; qwen3B unreliable; codex/auto trustworthy; sub-1B builders
+  below the capability floor) — every entry carries note + n + source +
+  date. probe/recommend print matching priors before the first token and
+  state the rule: priors inform, runs decide. Community submissions stay
+  gated on reproducibility.
+- **Drift watch (#22).** `bench --baseline last.json`: per-arm paired
+  per-task comparison against a saved bundle; REGRESSED only on a
+  consistent drop (t≥2), improvements and noise named as such; non-zero
+  exit on regression. The cron/CI alarm for silently-updated models.
+- **Multiple-comparison guard (#23).** Sweeping k candidates = k chances to
+  win by luck: `separation()` takes a comparisons count, the bar rises
+  Bonferroni-style (t≥2 → ≥2.81 at k=10, table, clamped), inconclusive
+  lines say what bar was missed, and k≥3 matrix picks carry a luck warning.
+
+**Verified:** 174/174 tests, clean typecheck, miner + priors live (probe
+printed the 0.5b rubber-stamp prior before running), mined pack validated
+against real and mutated implementations.

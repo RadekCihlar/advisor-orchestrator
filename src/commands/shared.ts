@@ -2,7 +2,8 @@
 // cli.ts is now only flag parsing + dispatch; each command lives in its own
 // file and pulls what it needs from here.
 
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { findEvidence, formatPriors, validateEvidence, type EvidenceEntry } from '../evidence.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { run, type Mode, type RunResult } from '../runner.js';
@@ -57,6 +58,9 @@ export const USAGE = `Usage:
     [--until-clear] [--max-repeat N]  keep adding repeats while the top two
     arms are statistically inseparable (paired per task); stop when clear
     or at --max-repeat (default 10).
+    [--baseline last.json]  drift watch: compare against a saved --out bundle
+    (paired per task) and exit non-zero on a significant regression — a
+    cron/CI alarm for silently-updated models.
     [--builder-engine X] [--builder-model X] [--reviewer-engine X] [--reviewer-model X]
     [--judge-engine X] [--judge-model X]   (judge scores "judge" graders; make it
                                             INDEPENDENT of the arms to avoid bias)
@@ -84,6 +88,13 @@ export const USAGE = `Usage:
     baseline control, and write the cheapest trustworthy reviewer within ε of
     the best to loupe.config.json — or report that no reviewer earns its keep.
     --force overwrites an existing loupe.config.json.
+
+  loupe tasks from-repo [dir] [--out mined-tasks.json]
+    Mine the repo's own tests into an exec-graded task pack — the benchmark
+    becomes literally your workload, zero authoring. v1 lifts assertions with
+    literal arguments on one exported function (assert.equal/deepEqual/ok/
+    throws, expect().toBe/.toEqual); fixture-based tests are skipped and
+    reported. REVIEW the output before benching.
 
   loupe stats [--json]
     Local run history from usage.jsonl (working dir, or $LOUPE_LOG): runs,
@@ -188,6 +199,23 @@ export async function resolveDecision(
     case 'mirror':
       throw new Error('internal: mirror decision must be handled by the caller');
   }
+}
+
+// Evidence priors (#21): shipped, curated pairing findings consulted before
+// spending tokens. Tolerant load — a missing/broken file means no priors,
+// never a crash. Priors inform; runs decide.
+export function loadEvidence(): EvidenceEntry[] {
+  try {
+    return validateEvidence(JSON.parse(readFileSync(join(repoRoot, 'benchmark', 'evidence.json'), 'utf8')));
+  } catch {
+    return [];
+  }
+}
+
+export function printPriors(entries: EvidenceEntry[], role: EvidenceEntry['role'], cfg: EngineConfig): void {
+  const hits = findEvidence(entries, role, cfg);
+  for (const line of formatPriors(hits, cfg)) console.log(line);
+  if (hits.length > 0) console.log('  (priors inform — this run decides)');
 }
 
 // One appended line per completed run (bench arms included) — a local usage

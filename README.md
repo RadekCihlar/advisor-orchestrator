@@ -95,7 +95,9 @@ loupe bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one
 
 Grades every arm, prints a quality × cost table (mean ±stddev per arm, `$`/task where priceable, a warning when n is too small to conclude) + verdict, saves the full data to JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear your bar.
 
-The verdict works for its confidence: significance is read **paired per task** (task difficulty variance cancels out, so the same tokens separate arms Welch would shrug at), a **"where review pays"** line names which tasks actually earn the reviewer, and `--until-clear` keeps adding repeats only while the top two arms are statistically inseparable (capped by `--max-repeat`, default 10) — tokens spent exactly where the verdict is uncertain.
+The verdict works for its confidence: significance is read **paired per task** (task difficulty variance cancels out, so the same tokens separate arms Welch would shrug at), a **"where review pays"** line names which tasks actually earn the reviewer, and `--until-clear` keeps adding repeats only while the top two arms are statistically inseparable (capped by `--max-repeat`, default 10) — tokens spent exactly where the verdict is uncertain. Matrix sweeps raise the significance bar with the number of candidates compared (k chances to win by luck), and `--baseline last.json` turns any saved run into a **drift watch**: paired comparison against the baseline, non-zero exit on significant regression — a cron/CI alarm for silently-updated models.
+
+**No task file? Mine your own repo.** `loupe tasks from-repo src/` lifts literal-argument assertions from your existing tests into self-contained exec checks and pairs them with the exported function's signature + JSDoc — the benchmark becomes literally your workload with zero authoring. v1 deliberately takes only what it can guarantee is self-contained (fixture-based tests are skipped and reported); review the output, then `loupe bench --tasks mined-tasks.json`.
 
 Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`, `constraint`, `hard` (edge-case-dense — headroom for review to visibly help where strong builders saturate the others) — all deterministic graders, each proven against a reference solution offline. Point `--tasks` at your own workload to learn which mode wins for *it*.
 
@@ -105,7 +107,7 @@ Not sure the reviewer you picked is worth consulting? Probe it first:
 loupe probe --reviewer-engine local --reviewer-model qwen2.5:3b
 ```
 
-Feeds it known-defective + known-correct outputs (through the exact prompt real runs use) and reports catch rate, false-alarm rate, and a verdict — a **rubber-stamp** reviewer approves planted defects and is worse than no reviewer at all.
+Feeds it known-defective + known-correct outputs (through the exact prompt real runs use) and reports catch rate, false-alarm rate, and a verdict — a **rubber-stamp** reviewer approves planted defects and is worse than no reviewer at all. Probe and `recommend` also consult a small shipped evidence file of provenance-tagged live findings (`benchmark/evidence.json`) and print matching priors before spending a token — priors inform, runs decide.
 
 Graders per task:
 

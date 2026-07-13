@@ -1,0 +1,42 @@
+[
+  {
+    "role": "reviewer",
+    "engine": "local",
+    "modelPattern": "(0\\.5b|:1b\\b|1\\.5b)",
+    "verdict": "rubber-stamp",
+    "note": "sub-2B local models approved planted defects at or below chance in live probes (qwen2.5:0.5b caught 0-1 of 5) — worse than no reviewer",
+    "n": 2,
+    "source": "docs/CHANGELOG.md §29 §30 §32",
+    "date": "2026-07-13"
+  },
+  {
+    "role": "reviewer",
+    "engine": "local",
+    "modelPattern": ":3b",
+    "verdict": "unreliable",
+    "note": "qwen2.5:3B caught 3/5 planted defects with 2/5 false alarms, and live-approved code that crashes on its first call",
+    "n": 2,
+    "source": "docs/CHANGELOG.md §29 §32",
+    "date": "2026-07-13"
+  },
+  {
+    "role": "reviewer",
+    "engine": "codex",
+    "modelPattern": ".*",
+    "verdict": "trustworthy",
+    "note": "codex/auto caught 5/5 planted defects with 0 false alarms and rejected broken output with concrete reasons every round",
+    "n": 1,
+    "source": "docs/CHANGELOG.md §29 §30",
+    "date": "2026-07-12"
+  },
+  {
+    "role": "builder",
+    "engine": "local",
+    "modelPattern": "(0\\.5b|:1b\\b)",
+    "verdict": "capability-floor",
+    "note": "sub-1B builders cannot execute fixes they can describe: re-shipped byte-identical broken code with fabricated changelogs; good feedback does not help below this floor",
+    "n": 1,
+    "source": "docs/CHANGELOG.md §29",
+    "date": "2026-07-12"
+  }
+]

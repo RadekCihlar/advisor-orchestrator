@@ -4,7 +4,7 @@ import { run, type Mode, type RunResult } from '../runner.js';
 import { call, detectAll, getEngine, isKnownEngine, KNOWN_ENGINES, type EngineConfig } from '../engines/index.js';
 import { planSelection } from '../selection.js';
 import { grade, type Grader } from '../grader.js';
-import { aggregate, formatReport, reportJson, separation, type RunRecord } from '../report.js';
+import { aggregate, driftVerdict, formatReport, reportJson, separation, type RunRecord } from '../report.js';
 import { estimateRunCostUsd } from '../pricing.js';
 import { runPool } from '../pool.js';
 import { tallyTokens } from '../usage.js';
@@ -230,6 +230,10 @@ export async function cmdBench(flags: Flags): Promise<void> {
 
   for (let i = 0; i < repeat; i++) await runWave(unitsForWave(i));
 
+  // #23: sweeping k reviewer candidates = k chances to win by luck — the
+  // significance bar rises with the number of comparisons.
+  const comparisons = reviewerMatrix ? reviewerMatrix.length : 1;
+
   // --until-clear (ROADMAP v3 #15): keep adding repeat-waves while the
   // top-vs-runner-up separation is inconclusive, up to --max-repeat. Spends
   // tokens only where the verdict is actually uncertain.
@@ -237,7 +241,7 @@ export async function cmdBench(flags: Flags): Promise<void> {
     const maxRepeat = Math.max(repeat, intFlag(flags, 'max-repeat', 10));
     let wave = repeat;
     for (; wave < maxRepeat; wave++) {
-      const sep = separation(aggregate(records), records);
+      const sep = separation(aggregate(records), records, comparisons);
       if (!sep) {
         console.log('\n--until-clear: nothing graded to separate — stopping.');
         break;
@@ -250,7 +254,7 @@ export async function cmdBench(flags: Flags): Promise<void> {
   }
 
   const stats = aggregate(records);
-  console.log('\n' + formatReport(stats, records));
+  console.log('\n' + formatReport(stats, records, comparisons));
 
   if (reviewerMatrix) {
     const rec = recommendFrom(stats);
@@ -259,20 +263,42 @@ export async function cmdBench(flags: Flags): Promise<void> {
         ? `\nMatrix pick: ${rec.reviewer.engine}/${rec.reviewer.model} — cheapest reviewer within ε of the best (score ${rec.arm.meanScore?.toFixed(2)}).`
         : '\nMatrix pick: none — baseline matches every reviewer here; a reviewer does not earn its keep on these tasks.',
     );
+    if (comparisons >= 3) {
+      console.log(`  (${comparisons} candidates compared — one can beat baseline by luck; trust picks that also clear the significance line.)`);
+    }
   }
 
+  const meta = {
+    generatedAt: new Date().toISOString(),
+    builder: `${benchBuilder.engine}/${benchBuilder.model}`,
+    reviewer: `${benchReviewer.engine}/${benchReviewer.model}`,
+    judge: `${judgeEngine.engine}/${judgeEngine.model}`,
+    consults,
+    repeat,
+    tasks: tasks.length,
+  };
   if (typeof flags.out === 'string') {
-    const meta = {
-      generatedAt: new Date().toISOString(),
-      builder: `${benchBuilder.engine}/${benchBuilder.model}`,
-      reviewer: `${benchReviewer.engine}/${benchReviewer.model}`,
-      judge: `${judgeEngine.engine}/${judgeEngine.model}`,
-      consults,
-      repeat,
-      tasks: tasks.length,
-    };
     writeFileSync(flags.out, JSON.stringify(reportJson(meta, stats, records), null, 2));
     console.log(`\nWrote results to ${flags.out}`);
+  }
+
+  // Drift watch (#22): compare against a saved bundle; exit non-zero on a
+  // significant regression so a cron/CI job can alarm. Runs before
+  // --fail-under so both gates apply.
+  if (typeof flags.baseline === 'string') {
+    let base: ReturnType<typeof reportJson>;
+    try {
+      base = JSON.parse(readFileSync(flags.baseline, 'utf8'));
+    } catch (err) {
+      console.error(`Error: cannot read --baseline ${flags.baseline}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    const drift = driftVerdict(base, reportJson(meta, stats, records));
+    console.log('\n' + drift.lines.join('\n'));
+    if (drift.regressed) {
+      console.error('\nFAIL: significant regression vs baseline.');
+      process.exit(1);
+    }
   }
 
   // CI quality gate: fail if even the best arm can't clear the bar.

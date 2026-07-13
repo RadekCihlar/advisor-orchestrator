@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { detectAll, getEngine, isKnownEngine, KNOWN_ENGINES } from '../engines/index.js';
 import { planSelection } from '../selection.js';
 import { formatProbeReport, probeReviewer, validateProbeItems } from '../probe.js';
-import { loadConfigAuto, repoRoot, resolveDecision, roleInputFrom, type Flags } from './shared.js';
+import { loadConfigAuto, loadEvidence, printPriors, repoRoot, resolveDecision, roleInputFrom, type Flags } from './shared.js';
 
 // `loupe probe` (ROADMAP #11): measure a reviewer's defect catch rate against
 // planted-bug fixtures BEFORE trusting it in advised/escalated runs.
@@ -40,6 +40,7 @@ export async function cmdProbe(flags: Flags): Promise<void> {
   });
   const reviewer = await resolveDecision(null, 'reviewer', plan.reviewer, detected);
 
+  printPriors(loadEvidence(), 'reviewer', reviewer);
   console.error(`Probing ${reviewer.engine}/${reviewer.model} with ${items.length} fixture(s) from ${probePath}…`);
   const result = await probeReviewer(items, reviewer);
   console.log(formatProbeReport(reviewer, result));

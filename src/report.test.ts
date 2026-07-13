@@ -275,3 +275,55 @@ test('separation: fewer than 2 graded arms → null', () => {
   const one = [trec('a', 'baseline', 0.5)];
   assert.equal(separation(aggregate(one), one), null);
 });
+
+// --- multiple-comparison guard (#23) ---
+
+test('separation: same t clears with 1 comparison but not with 8 (Bonferroni-stiffened)', () => {
+  // Craft a gap with t just over 2: diffs [0.1, 0.2, 0.3, 0.2] → md=0.2, sd≈0.082, t≈4.9 — too clear.
+  // Use noisier diffs: [0.30, -0.05, 0.25, 0.10] → md=0.15, sd≈0.155, t≈1.94 — under even 2.
+  // Middle ground: [0.25, 0.05, 0.25, 0.05] → md=0.15, sd≈0.115, t≈2.6: clears 2.0, not the k=8 bar (~2.7+).
+  const mk = (task: string, base: number, adv: number) => [trec(task, 'baseline', base), trec(task, 'advised', adv)];
+  const records = [...mk('a', 0.5, 0.75), ...mk('b', 0.5, 0.55), ...mk('c', 0.3, 0.55), ...mk('d', 0.3, 0.35)];
+  const stats = aggregate(records);
+  assert.equal(separation(stats, records)?.clear, true, 'k=1: t≈2.6 clears the 2.0 bar');
+  const guarded = separation(stats, records, 8);
+  assert.equal(guarded?.clear, false, 'k=8 comparisons: bar rises past 2.6');
+  assert.match(guarded!.detail, /8 comparisons/, guarded!.detail);
+});
+
+// --- drift watch (#22): bench --baseline ---
+
+import { driftVerdict } from './report.js';
+
+const bundle = (records: RunRecord[], ts: string) => reportJson({ generatedAt: ts }, aggregate(records), records);
+
+test('driftVerdict: consistent per-task drop → REGRESSED, exit-worthy', () => {
+  const before = [trec('a', 'advised', 0.9), trec('b', 'advised', 0.8), trec('c', 'advised', 0.85)];
+  const after = [trec('a', 'advised', 0.6), trec('b', 'advised', 0.5), trec('c', 'advised', 0.55)];
+  const d = driftVerdict(bundle(before, 'T1'), bundle(after, 'T2'));
+  assert.equal(d.regressed, true);
+  assert.match(d.lines.join('\n'), /advised.*REGRESSED/);
+});
+
+test('driftVerdict: mixed noise → no regression flagged', () => {
+  const before = [trec('a', 'advised', 0.9), trec('b', 'advised', 0.3), trec('c', 'advised', 0.6)];
+  const after = [trec('a', 'advised', 0.4), trec('b', 'advised', 0.8), trec('c', 'advised', 0.61)];
+  const d = driftVerdict(bundle(before, 'T1'), bundle(after, 'T2'));
+  assert.equal(d.regressed, false);
+});
+
+test('driftVerdict: improvement is named, not flagged', () => {
+  const before = [trec('a', 'advised', 0.5), trec('b', 'advised', 0.4), trec('c', 'advised', 0.45)];
+  const after = [trec('a', 'advised', 0.8), trec('b', 'advised', 0.7), trec('c', 'advised', 0.75)];
+  const d = driftVerdict(bundle(before, 'T1'), bundle(after, 'T2'));
+  assert.equal(d.regressed, false);
+  assert.match(d.lines.join('\n'), /improved/);
+});
+
+test('driftVerdict: baseline without per-task overlap → directional note only', () => {
+  const before = [trec('x', 'advised', 0.9)];
+  const after = [trec('y', 'advised', 0.2)];
+  const d = driftVerdict(bundle(before, 'T1'), bundle(after, 'T2'));
+  assert.equal(d.regressed, false);
+  assert.match(d.lines.join('\n'), /directional/i);
+});

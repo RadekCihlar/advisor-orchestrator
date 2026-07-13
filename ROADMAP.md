@@ -80,38 +80,33 @@ From real runs this project already produced:
 
 ## Later — the level after that
 
-The three ideas that would genuinely raise the ceiling, in leverage order.
-Each is L-sized; none should start before someone actually needs it.
+20. ✅ **DONE (v1) — Tasks from your own repo** `[useful]` — `loupe tasks
+    from-repo [dir]`: lifts literal-argument assertions (assert.equal/
+    deepEqual/ok/throws, expect().toBe/.toEqual) from existing tests into
+    self-contained exec checks attributed to exactly one exported function,
+    pairs them with that function's signature + JSDoc, writes a task pack.
+    Fixture-based tests are skipped AND reported — v1 takes only what it can
+    guarantee is self-contained. Dogfooded on loupe's own src: 3 tasks
+    mined, ground-truth proven both ways (real impl 1.0, mutated impl <1)
+    (2026-07-13). v2 (gated on demand): fixture inlining, more runners.
 
-20. **Tasks from your own repo** `[useful]` · L — the #1 adoption blocker is
-    "write a task file". Kill it: mine the user's repo for real tasks — a
-    function with co-located tests becomes an exec-graded task automatically
-    (prompt = signature + docstring + the file's context; grader = the real
-    tests). `loupe tasks from-repo src/` → a pack that IS your workload.
-    Nobody writes fixtures; the bench answers "which mode wins for the code
-    I actually write". Hard parts: test extraction per runner, context
-    self-containment, secrets hygiene when prompts quote repo code.
+21. ✅ **DONE (v1) — Pairing-evidence priors** `[better]` —
+    `benchmark/evidence.json`: curated, provenance-tagged findings from live
+    runs (every entry carries note + n + source + date); probe/recommend
+    print matching priors BEFORE spending tokens. Priors inform, runs decide
+    — nothing is skipped on a prior alone. Community submissions remain
+    gated on a reproducibility story; without it, priors are misinformation
+    (2026-07-13).
 
-21. **Pairing-evidence dataset + informed recommend** `[better]` · L —
-    loupe's measurements are throwaway-local today. Ship a small, versioned,
-    provenance-tagged dataset of pairing results (model × role × pack →
-    catch rate, score deltas) and let `recommend`/`probe` consult it as a
-    prior: "community data: ≤1b reviewers rubber-stamp (n=14) — skipping".
-    The network effect is the level jump — a caniuse for model pairings.
-    Gates: a submission-verification story (results must be reproducible),
-    and model-version drift handling. Without those it's misinformation.
+22. ✅ **DONE — Drift watch** `[useful]` — `bench --baseline last.json`:
+    paired per-task comparison of each arm against a saved bundle; REGRESSED
+    only when the drop is consistent (t≥2), improvement and noise named as
+    such; non-zero exit on regression → cron/CI alarm (2026-07-13).
 
-22. **Drift watch** `[useful]` · M — providers silently update models;
-    yesterday's verdict rots. `bench --baseline last.json`: run, diff, exit
-    non-zero on significant regression (paired read, same machinery) —
-    cron/CI recipe in the docs. Gate: first report of a pairing that
-    regressed in the wild.
-
-23. **Multiple-comparison guard in the matrix** `[better]` · S — sweeping k
-    reviewers inflates the false-positive rate of "the best one beats
-    baseline" (k chances to get lucky). Note it in the matrix verdict and
-    stiffen the threshold (Bonferroni-style t≥2 → t≥~2+ for k>3). Small,
-    keeps the sweep honest.
+23. ✅ **DONE — Multiple-comparison guard** `[better]` — matrix sweeps pass
+    k into `separation()`: Bonferroni-style bar (t≥2 at k=1 up to ≥2.81 at
+    k=10), inconclusive lines say "under k comparisons (need t≥X)", and
+    matrix picks with k≥3 carry the luck warning (2026-07-13).
 
 ## The cap — named
 

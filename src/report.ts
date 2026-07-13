@@ -81,7 +81,7 @@ const n0 = (x: number): string => Math.round(x).toLocaleString('en-US');
 // records is optional but worth passing (bench does): it unlocks the paired
 // significance read and the per-task "where review pays" strata — both of
 // which extract more verdict from the same tokens than arm-level means can.
-export function formatReport(stats: ArmStats[], records?: RunRecord[]): string {
+export function formatReport(stats: ArmStats[], records?: RunRecord[], comparisons = 1): string {
   if (stats.length === 0) return 'No runs to report.';
 
   const lines: string[] = [];
@@ -125,7 +125,7 @@ export function formatReport(stats: ArmStats[], records?: RunRecord[]): string {
 
   lines.push('Verdict:');
   lines.push(`  Best quality:            ${bestQualityLabel(graded, bestScore)}`);
-  const sig = separation(stats, records);
+  const sig = separation(stats, records, comparisons);
   if (sig) lines.push(`  Significance:            ${sig.detail}`);
   const strata = whereReviewPays(graded, records);
   if (strata) lines.push(strata);
@@ -191,7 +191,19 @@ export interface Separation {
   detail: string;
 }
 
-function pairedSeparation(records: RunRecord[], top: ArmStats & { meanScore: number }, second: ArmStats & { meanScore: number }): Separation | null {
+// #23: sweeping k candidates gives k chances to "beat the runner-up" by luck.
+// Bonferroni-style bar: two-sided normal quantile for α = 0.05/k. Table keeps
+// it dependency-free; clamped at the top — past 10 comparisons the honest fix
+// is fewer candidates, not a taller bar.
+const T_REQUIRED = [2, 2, 2.24, 2.39, 2.5, 2.58, 2.64, 2.69, 2.73, 2.77, 2.81]; // index = comparisons
+const tRequired = (comparisons: number): number => T_REQUIRED[Math.min(Math.max(comparisons, 1), 10)];
+
+function pairedSeparation(
+  records: RunRecord[],
+  top: ArmStats & { meanScore: number },
+  second: ArmStats & { meanScore: number },
+  comparisons: number,
+): Separation | null {
   const a = perTaskMeans(records, top.mode);
   const b = perTaskMeans(records, second.mode);
   const shared = [...a.keys()].filter((k) => b.has(k));
@@ -204,8 +216,10 @@ function pairedSeparation(records: RunRecord[], top: ArmStats & { meanScore: num
   if (md === 0) return { clear: false, detail: `${label} — identical mean scores, nothing to separate (${paired})` };
   if (sd === 0) return { clear: true, detail: `${label} — clear at this n: the same gap on every task (${paired})` };
   const t = Math.abs(md) / (sd / Math.sqrt(shared.length));
-  if (t >= 2) return { clear: true, detail: `${label} — clear at this n (${paired}, t≈${t.toFixed(1)})` };
-  return { clear: false, detail: `${label} — inconclusive at this n (${paired}, t≈${t.toFixed(1)}) — raise --repeat` };
+  const bar = tRequired(comparisons);
+  if (t >= bar) return { clear: true, detail: `${label} — clear at this n (${paired}, t≈${t.toFixed(1)})` };
+  const why = comparisons > 1 ? `under ${comparisons} comparisons (${paired}, t≈${t.toFixed(1)}, need ≥${bar})` : `(${paired}, t≈${t.toFixed(1)})`;
+  return { clear: false, detail: `${label} — inconclusive at this n ${why} — raise --repeat` };
 }
 
 // ROADMAP v3 #14: the expected real-world finding is "review helps on the
@@ -232,16 +246,18 @@ function whereReviewPays(graded: Array<ArmStats & { meanScore: number }>, record
 }
 
 // Exported for `bench --until-clear` (ROADMAP v3 #15): the stop signal is
-// "is the top-vs-runner-up separation trustworthy yet?".
-export function separation(stats: ArmStats[], records?: RunRecord[]): Separation | null {
+// "is the top-vs-runner-up separation trustworthy yet?". comparisons > 1
+// (matrix sweeps) stiffens the bar — see tRequired (#23).
+export function separation(stats: ArmStats[], records?: RunRecord[], comparisons = 1): Separation | null {
   const graded = stats.filter((s): s is ArmStats & { meanScore: number } => s.meanScore !== null);
   if (graded.length < 2) return null; // one arm — nothing to compare
   const ranked = [...graded].sort((a, b) => b.meanScore - a.meanScore);
   const [top, second] = ranked;
   if (records) {
-    const paired = pairedSeparation(records, top, second);
+    const paired = pairedSeparation(records, top, second, comparisons);
     if (paired) return paired;
   }
+  const bar = tRequired(comparisons);
   const diff = top.meanScore - second.meanScore;
   const label = `${top.mode} ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} vs ${second.mode}`;
   if (top.stddevScore === null || second.stddevScore === null) {
@@ -251,10 +267,11 @@ export function separation(stats: ArmStats[], records?: RunRecord[]): Separation
   const se = Math.sqrt(top.stddevScore ** 2 / top.gradedRuns + second.stddevScore ** 2 / second.gradedRuns);
   if (se === 0) return { clear: true, detail: `${label} — clear at this n (zero variance in both arms)` };
   const t = diff / se;
-  if (t >= 2) return { clear: true, detail: `${label} — clear at this n (t≈${t.toFixed(1)})` };
+  if (t >= bar) return { clear: true, detail: `${label} — clear at this n (t≈${t.toFixed(1)})` };
   const nNeeded = Math.ceil((4 * (top.stddevScore ** 2 + second.stddevScore ** 2)) / diff ** 2);
   const more = Math.max(1, nNeeded - Math.max(top.gradedRuns, second.gradedRuns));
-  return { clear: false, detail: `${label} — inconclusive at this n, run ~${more} more repeats (t≈${t.toFixed(1)})` };
+  const why = comparisons > 1 ? ` under ${comparisons} comparisons (need t≥${bar})` : '';
+  return { clear: false, detail: `${label} — inconclusive at this n${why}, run ~${more} more repeats (t≈${t.toFixed(1)})` };
 }
 
 // Serializable bundle for `bench --out results.json` — lets runs accumulate and
@@ -266,6 +283,50 @@ export interface ReportJson {
 }
 export function reportJson(meta: Record<string, unknown>, stats: ArmStats[], records: RunRecord[]): ReportJson {
   return { meta, stats, records };
+}
+
+// Drift watch (ROADMAP v3 #22): providers silently update models, so a saved
+// verdict rots. Compare a fresh bench run against a saved baseline bundle,
+// arm by arm, with the same paired-per-task read — REGRESSED only when the
+// drop is consistent enough to act on (a cron/CI alarm, not a noise pager).
+export interface DriftResult {
+  regressed: boolean;
+  lines: string[];
+}
+
+export function driftVerdict(baseline: ReportJson, current: ReportJson): DriftResult {
+  const lines: string[] = [];
+  lines.push('=== drift vs baseline ===');
+  lines.push(`baseline: ${typeof baseline.meta.generatedAt === 'string' ? baseline.meta.generatedAt : 'no timestamp'}`);
+  let regressed = false;
+  const currentModes = new Set(current.stats.map((s) => s.mode));
+  for (const arm of baseline.stats) {
+    if (!currentModes.has(arm.mode)) continue;
+    const cur = current.stats.find((s) => s.mode === arm.mode)!;
+    if (arm.meanScore === null || cur.meanScore === null) continue;
+    const before = perTaskMeans(baseline.records, arm.mode);
+    const after = perTaskMeans(current.records, arm.mode);
+    const shared = [...before.keys()].filter((k) => after.has(k));
+    const move = `${arm.meanScore.toFixed(2)} → ${cur.meanScore.toFixed(2)} (Δ${cur.meanScore - arm.meanScore >= 0 ? '+' : ''}${(cur.meanScore - arm.meanScore).toFixed(2)})`;
+    if (shared.length < 2) {
+      lines.push(`${arm.mode}: ${move} — directional only (<2 shared tasks with the baseline)`);
+      continue;
+    }
+    const diffs = shared.map((k) => after.get(k)! - before.get(k)!);
+    const md = mean(diffs);
+    const sd = sampleStddev(diffs)!;
+    const t = sd === 0 ? Infinity : Math.abs(md) / (sd / Math.sqrt(shared.length));
+    const paired = `paired across ${shared.length} tasks`;
+    if (md < 0 && t >= 2) {
+      regressed = true;
+      lines.push(`${arm.mode}: ${move} — REGRESSED (${paired}, t≈${Number.isFinite(t) ? t.toFixed(1) : '∞'})`);
+    } else if (md > 0 && t >= 2) {
+      lines.push(`${arm.mode}: ${move} — improved (${paired}, t≈${Number.isFinite(t) ? t.toFixed(1) : '∞'})`);
+    } else {
+      lines.push(`${arm.mode}: ${move} — no significant change (${paired}, t≈${Number.isFinite(t) ? t.toFixed(1) : '∞'})`);
+    }
+  }
+  return { regressed, lines };
 }
 
 // `loupe diff a.json b.json` — did my prompt/model change help? Compares two

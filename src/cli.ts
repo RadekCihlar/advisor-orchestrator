@@ -14,6 +14,7 @@ import { cmdProbe } from './commands/probe.js';
 import { cmdRecommend } from './commands/recommend.js';
 import { cmdStats } from './commands/stats.js';
 import { cmdMcp } from './commands/mcp.js';
+import { cmdTasks } from './commands/tasks.js';
 
 async function main() {
   const { flags, positional } = parseArgs(process.argv);
@@ -28,6 +29,7 @@ async function main() {
   if (command === 'recommend') return cmdRecommend(flags);
   if (command === 'stats') return cmdStats(flags);
   if (command === 'mcp') return cmdMcp();
+  if (command === 'tasks') return cmdTasks(flags, positional);
   if (command === 'providers') return cmdProviders();
   if (command === 'setup') return cmdSetup();
   if (command === 'run') return cmdRun(flags, positional);

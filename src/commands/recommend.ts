@@ -9,7 +9,7 @@ import { estimateRunCostUsd } from '../pricing.js';
 import { tallyTokens } from '../usage.js';
 import { probeReviewer, validateProbeItems } from '../probe.js';
 import { armLabelFor, parseReviewerSpecs, recommendFrom } from '../matrix.js';
-import { intFlag, loadConfigAuto, repoRoot, resolveDecision, roleInputFrom, type Flags } from './shared.js';
+import { intFlag, loadConfigAuto, loadEvidence, printPriors, repoRoot, resolveDecision, roleInputFrom, type Flags } from './shared.js';
 
 // `loupe recommend` (ROADMAP #8's UX face): one command from candidates to a
 // configured pairing. Probe gates the candidates (a rubber-stamp reviewer must
@@ -69,8 +69,10 @@ export async function cmdRecommend(flags: Flags): Promise<void> {
   // "top quality can't be worse than baseline" and nearly free.
   const probePath = typeof flags.probe === 'string' ? flags.probe : join(repoRoot, 'benchmark', 'probe.json');
   const items = validateProbeItems(JSON.parse(readFileSync(probePath, 'utf8')));
+  const evidence = loadEvidence();
   const survivors: EngineConfig[] = [];
   for (const cand of candidates) {
+    printPriors(evidence, 'reviewer', cand);
     console.log(`Probing ${cand.engine}/${cand.model}…`);
     const p = await probeReviewer(items, cand, undefined, () => {});
     const rates = `caught ${p.defectsCaught}/${p.defectsTotal}, false alarms ${p.falseAlarms}/${p.correctTotal}`;
