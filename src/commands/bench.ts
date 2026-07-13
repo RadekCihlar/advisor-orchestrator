@@ -4,7 +4,7 @@ import { run, type Mode, type RunResult } from '../runner.js';
 import { call, detectAll, getEngine, isKnownEngine, KNOWN_ENGINES, type EngineConfig } from '../engines/index.js';
 import { planSelection } from '../selection.js';
 import { grade, type Grader } from '../grader.js';
-import { aggregate, formatReport, reportJson, type RunRecord } from '../report.js';
+import { aggregate, formatReport, reportJson, separation, type RunRecord } from '../report.js';
 import { estimateRunCostUsd } from '../pricing.js';
 import { runPool } from '../pool.js';
 import { tallyTokens } from '../usage.js';
@@ -144,19 +144,22 @@ export async function cmdBench(flags: Flags): Promise<void> {
     reviewer: EngineConfig;
     verifier?: (output: string) => Promise<{ passed: boolean; feedback: string }>;
   }
-  const units: BenchUnit[] = [];
-  for (const t of tasks) {
-    // The verify arm only exists where a programmatic verifier does (exec
-    // grader): its verifier reruns the task's tests and feeds failures back —
-    // test result as BOTH the in-loop signal and (below) the scorer.
-    const verifier =
-      t.grader?.type === 'exec'
-        ? async (output: string) => {
-            const g = await grade(t.grader!, output);
-            return { passed: g.score === 1, feedback: g.detail };
-          }
-        : undefined;
-    for (let i = 0; i < repeat; i++) {
+  // One "wave" = repeat-index i of every task × arm. --until-clear appends
+  // waves one at a time until the verdict separates, so unit construction is
+  // per-wave instead of upfront.
+  const unitsForWave = (i: number): BenchUnit[] => {
+    const units: BenchUnit[] = [];
+    for (const t of tasks) {
+      // The verify arm only exists where a programmatic verifier does (exec
+      // grader): its verifier reruns the task's tests and feeds failures back —
+      // test result as BOTH the in-loop signal and (below) the scorer.
+      const verifier =
+        t.grader?.type === 'exec'
+          ? async (output: string) => {
+              const g = await grade(t.grader!, output);
+              return { passed: g.score === 1, feedback: g.detail };
+            }
+          : undefined;
       if (reviewerMatrix) {
         // Matrix: one shared baseline control + one advised arm per candidate.
         // self-review/escalated/verify don't vary with the reviewer choice.
@@ -171,12 +174,13 @@ export async function cmdBench(flags: Flags): Promise<void> {
         }
       }
     }
-  }
+    return units;
+  };
   if (quiet) {
-    console.log(`--parallel ${parallel}: ${units.length} runs, compact output. Same-provider calls share rate limits — dial back if you see 429s.\n`);
+    console.log(`--parallel ${parallel}: ${unitsForWave(0).length * repeat} runs, compact output. Same-provider calls share rate limits — dial back if you see 429s.\n`);
   }
 
-  await runPool(units, parallel, async ({ t, i, mode, armLabel, reviewer, verifier }) => {
+  const runWave = (units: BenchUnit[]) => runPool(units, parallel, async ({ t, i, mode, armLabel, reviewer, verifier }) => {
     const builder = benchBuilder;
     const tag = `task=${t.id} run=${i + 1} arm=${armLabel}`;
     if (!quiet) console.log(`\n### ${tag}`);
@@ -224,8 +228,29 @@ export async function cmdBench(flags: Flags): Promise<void> {
     }
   });
 
+  for (let i = 0; i < repeat; i++) await runWave(unitsForWave(i));
+
+  // --until-clear (ROADMAP v3 #15): keep adding repeat-waves while the
+  // top-vs-runner-up separation is inconclusive, up to --max-repeat. Spends
+  // tokens only where the verdict is actually uncertain.
+  if (flags['until-clear'] === true) {
+    const maxRepeat = Math.max(repeat, intFlag(flags, 'max-repeat', 10));
+    let wave = repeat;
+    for (; wave < maxRepeat; wave++) {
+      const sep = separation(aggregate(records), records);
+      if (!sep) {
+        console.log('\n--until-clear: nothing graded to separate — stopping.');
+        break;
+      }
+      if (sep.clear) break;
+      console.log(`\n--until-clear: ${sep.detail} — adding repeat ${wave + 1}/${maxRepeat}…`);
+      await runWave(unitsForWave(wave));
+    }
+    if (wave >= maxRepeat) console.log(`\n--until-clear: hit --max-repeat ${maxRepeat} — reporting what we have.`);
+  }
+
   const stats = aggregate(records);
-  console.log('\n' + formatReport(stats));
+  console.log('\n' + formatReport(stats, records));
 
   if (reviewerMatrix) {
     const rec = recommendFrom(stats);

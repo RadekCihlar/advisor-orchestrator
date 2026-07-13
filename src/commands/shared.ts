@@ -54,6 +54,9 @@ export const USAGE = `Usage:
     calls share rate limits). Default 1 = sequential, full per-run output.
     --pack <name> runs benchmark/packs/<name>.json; --task <id> runs one task.
     [--out results.json] [--fail-under 0.8]  (exit non-zero if best arm < bar — a CI gate)
+    [--until-clear] [--max-repeat N]  keep adding repeats while the top two
+    arms are statistically inseparable (paired per task); stop when clear
+    or at --max-repeat (default 10).
     [--builder-engine X] [--builder-model X] [--reviewer-engine X] [--reviewer-model X]
     [--judge-engine X] [--judge-model X]   (judge scores "judge" graders; make it
                                             INDEPENDENT of the arms to avoid bias)
@@ -81,6 +84,16 @@ export const USAGE = `Usage:
     baseline control, and write the cheapest trustworthy reviewer within ε of
     the best to loupe.config.json — or report that no reviewer earns its keep.
     --force overwrites an existing loupe.config.json.
+
+  loupe stats [--json]
+    Local run history from usage.jsonl (working dir, or $LOUPE_LOG): runs,
+    tokens, est. $, per-pairing rounds/approval/flag rates, last run.
+    --json: one stable JSON document — statusline/script material.
+
+  loupe mcp
+    Serve loupe as an MCP server on stdio (tools: loupe_run, loupe_probe,
+    loupe_recommend, loupe_stats) — Cursor, Codex CLI, Claude Code/Desktop,
+    or any MCP client. Setup snippets: docs/INTEGRATIONS.md.
 
   loupe diff a.json b.json
     Compare two \`bench --out\` result files per arm — did my prompt/model/config

@@ -44,7 +44,7 @@ loupe setup                    # pick builder + reviewer from detected providers
 loupe run "your task"          # runs the revision loop — auto-loads loupe.config.json, no flags needed
 ```
 
-`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks); `--json` puts one machine-readable JSON document on stdout with the human narration on stderr. Every completed run appends a line to `usage.jsonl` in the working directory (`LOUPE_LOG` overrides the path) — a local run history.
+`run` extras: pass `-` as the task to read it from stdin (long/multiline tasks); `--json` puts one machine-readable JSON document on stdout with the human narration on stderr. Every completed run appends a line to `usage.jsonl` in the working directory (`LOUPE_LOG` overrides the path) — and `loupe stats` turns that history into evidence: runs, tokens, estimated $, per-pairing approval rates. `loupe stats --json` is stable output for statuslines and scripts ([examples](docs/INTEGRATIONS.md#statusline--scripts)).
 
 What a run looks like (a real session, free local model in both roles):
 
@@ -95,6 +95,8 @@ loupe bench --tasks ./my-tasks.json --task my-task-id   # or your own file / one
 
 Grades every arm, prints a quality × cost table (mean ±stddev per arm, `$`/task where priceable, a warning when n is too small to conclude) + verdict, saves the full data to JSON, and — with `--fail-under` — exits non-zero if the best arm can't clear your bar.
 
+The verdict works for its confidence: significance is read **paired per task** (task difficulty variance cancels out, so the same tokens separate arms Welch would shrug at), a **"where review pays"** line names which tasks actually earn the reviewer, and `--until-clear` keeps adding repeats only while the top two arms are statistically inseparable (capped by `--max-repeat`, default 10) — tokens spent exactly where the verdict is uncertain.
+
 Built-in packs: `coding` (exec-graded, multi-assertion), `reasoning`, `constraint`, `hard` (edge-case-dense — headroom for review to visibly help where strong builders saturate the others) — all deterministic graders, each proven against a reference solution offline. Point `--tasks` at your own workload to learn which mode wins for *it*.
 
 Not sure the reviewer you picked is worth consulting? Probe it first:
@@ -138,9 +140,21 @@ This repo is also a composite action — gate PRs on a quality bar:
 
 Defaults to the key-based `anthropic-api` engine for both roles (CI has no provider CLIs); see [`action.yml`](action.yml) for all inputs.
 
-## Claude Code plugin
+## Use it from your agent — MCP, plugin, or plain CLI
 
-This repo doubles as a Claude Code plugin: a SessionStart hook teaches every session to delegate write-then-judge asks ("have opus write it, let ollama judge it", "second opinion from a cheaper model") to the loupe CLI instead of hand-rolling API calls — and to report rounds, verdicts, and tokens back. `/loupe` carries the full recipe table.
+`loupe mcp` is a zero-dependency stdio MCP server exposing `loupe_run` / `loupe_probe` / `loupe_recommend` / `loupe_stats` — so Cursor, Codex CLI, Claude Code/Desktop, or any MCP client can delegate a task cross-model and get the measured verdict back:
+
+```sh
+claude mcp add loupe -- npx -y @cihlarr/loupe mcp     # Claude Code
+codex mcp add loupe -- npx -y @cihlarr/loupe mcp      # Codex CLI
+# Cursor / Claude Desktop / anything else: see docs/INTEGRATIONS.md
+```
+
+Per-client configs, a copy-paste instruction block for agents without MCP, and statusline snippets: [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+### Claude Code plugin
+
+For Claude Code specifically there's also a richer plugin: a SessionStart hook teaches every session to delegate write-then-judge asks ("have opus write it, let ollama judge it") to the loupe CLI — and to report rounds, verdicts, and tokens back. `/loupe` carries the full recipe table.
 
 ```sh
 claude plugin marketplace add RadekCihlar/Loupe

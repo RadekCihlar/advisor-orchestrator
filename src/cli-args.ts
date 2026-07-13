@@ -3,7 +3,7 @@
 
 import type { Flags } from './commands/shared.js';
 
-const BOOL_FLAGS = new Set(['json', 'help', 'lean', 'force']); // never consume the next arg as a value
+const BOOL_FLAGS = new Set(['json', 'help', 'lean', 'force', 'until-clear']); // never consume the next arg as a value
 
 export function parseArgs(argv: string[]): { flags: Flags; positional: string[] } {
   const args = argv.slice(2);

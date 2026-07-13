@@ -1,14 +1,19 @@
-# loupe — Roadmap v2
+# loupe — Roadmap v3
 
-v1 shipped in full (2026-07-07 → 2026-07-12) — archived in
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md) §25–§28. Only #12 carried over.
+v1 (2026-07-07 → 2026-07-12) and v2 (2026-07-12 → 2026-07-13) shipped in
+full — archived in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) §25–§32. v2
+delivered: codex live, significance + cost-aware verdicts, the reviewer
+probe, the hard pack, the lean protocol + prompt caching, the reviewer
+matrix, and `recommend`.
 
-loupe's job: tell you whether a reviewer / verify loop is worth it for **your**
-tasks, across providers. Ordered by leverage; every item tagged `[better]`
-(measurement quality), `[useful]` (product/adoption), or `[cleaner]` (debt),
-with a rough effort (S/M/L).
+loupe's job is unchanged: tell you whether a reviewer / verify loop is worth
+it for **your** tasks, across providers. The feature core of that niche is
+built. v3's leverage is elsewhere: **sharper statistics** (the verdict IS the
+product), **evidence at scale**, and **reach**. If an idea doesn't sharpen a
+verdict, accumulate evidence, or put loupe where users already are, it's
+probably a non-goal.
 
-## The finding loupe must protect (why it exists)
+## The findings loupe must protect (why it exists)
 
 From real runs this project already produced:
 
@@ -17,130 +22,102 @@ From real runs this project already produced:
 - **Self-review can't rescue a weak model** — it can't catch its own bug.
 - **Strong models on easy tasks gain nothing** from review — pure added cost.
 - **`verify` (run the tests) is the cheapest reliable check for code.**
-- **A too-weak reviewer is worse than no reviewer** (live 2026-07-12):
-  qwen2.5:3B APPROVED 0.5b-built code that crashes on its first call, while
-  codex rejected it every round with concrete reasons. A rubber-stamp converts
-  broken output into *approved* broken output.
+- **A too-weak reviewer is worse than no reviewer** (live 2026-07-12): a 3B
+  reviewer APPROVED code that crashes on its first call. A rubber-stamp
+  converts broken output into *approved* broken output.
 - **A too-weak builder can't execute the fixes it can describe** (live
   2026-07-12): 0.5b re-shipped byte-identical broken code with a fabricated
-  changelog claiming the reviewer's fixes were applied. Feedback quality
-  doesn't matter below the builder's capability floor.
+  changelog. Feedback quality doesn't matter below the builder's capability
+  floor.
+- **Reviewers below the builder's level actively subtract** (live matrix,
+  2026-07-13): 0.5b builder baseline 0.40 → 0.20 advised by EITHER local
+  reviewer, at 2–15× the cost. The matrix picked "none" — correctly.
+- **Protocol changes are pairing-dependent** (lean A/B, 2026-07-13): lean
+  advised +0.07 score at −39% tokens, but lean self-review −0.30 — a weak
+  model re-reviewing its own diff gets worse. Never flip a default without
+  the A/B.
 
-Every roadmap item should sharpen loupe's ability to turn that folklore into a
-per-workload measurement. If an item doesn't, it's probably a non-goal.
+## Now — sharper statistics `[better]`
 
----
+13. ✅ **DONE — Paired significance** `[better]` — the significance read now
+    pairs per-task differences between the top two arms (task-difficulty
+    variance cancels), falling back to Welch when <2 shared tasks. "clear at
+    this n (paired across 4 tasks, t≈…)" (2026-07-13).
 
-## Now — close the honesty gap
+14. ✅ **DONE — Stratified verdict** `[better]` — "Where review pays
+    (advised vs baseline): parse +0.50 · luhn ±0.00 · roman −0.10 → pays on
+    1/3 tasks" — per-task Δ of the best non-baseline arm, in every report
+    with ≥2 shared graded tasks (2026-07-13).
 
-Everything here is shipped code the README currently has to hedge about.
-Closing these converts "written to spec" into "verified live".
+15. ✅ **DONE — Adaptive repeats** `[better]` — `bench --until-clear
+    [--max-repeat N]` (default 10): adds repeat-waves only while the top two
+    arms are statistically inseparable. Stop signal = the exported
+    `separation()` (paired-first) (2026-07-13).
 
-1. **Live-verify `anthropic-api` / `openai-api` + the pricing table**
-   `[useful]` · S — one `loupe run` and one bench task per engine with a real
-   key; compare the `$` estimate against the provider's own usage numbers.
-   Blocked on: a key in the env.
+16. ✅ **DONE — `loupe stats`** `[useful]` — usage.jsonl → runs, tokens,
+    est. $, per-pairing rounds/approval/flag rates, last run. `--json` is a
+    stable document for statuslines/scripts (docs/INTEGRATIONS.md has
+    one-liners) (2026-07-13).
 
-2. ✅ **DONE — exercise the GitHub Action from a caller workflow** `[useful]` —
-   `.github/workflows/action-test.yml` consumes `uses: RadekCihlar/Loupe@master`
-   as a real caller (resolved from origin, not a local path): a pass job runs
-   the reasoning pack through Ollama on the runner (no key secret needed) and
-   the gate exits 0; a fail job proves a bogus engine's non-zero exit fails the
-   caller job. Verified 2026-07-12, both jobs green. Still untested: key
-   pass-through via `env:` (needs an `ANTHROPIC_API_KEY` secret — folds into
-   #1) (design §28).
+## Next — evidence & reach `[useful]`
 
-3. ✅ **DONE — Codex engine live** `[useful]` — codex-cli 0.144.1 run live
-   2026-07-12. Two spawning bugs found and fixed (the parser held): execFile's
-   open stdin pipe hung codex indefinitely → shared `runBin` spawn helper
-   (`src/engines/spawn.ts`, also adopted by claude-code, killing its ~3s/call
-   stdin wait); ChatGPT-subscription auth 400s on every explicit `-m` → model
-   `'auto'` default omits the flag. Five live cross-provider runs completed
-   (codex reviewer × local/claude builders) — see CHANGELOG §29.
+17. **Pack ecosystem** · S — `--tasks <url>` (fetch a task file over HTTPS),
+    a documented pack-format spec (PACKS.md), and a contrib guide. Domain
+    packs (sql, regex, shell, frontend) are the cheapest way for the
+    community to extend loupe's usefulness without touching the core.
 
-## Next — sharper verdicts `[better]`
+18. ✅ **DONE — MCP server** `[useful]` — `loupe mcp`: zero-dep stdio
+    JSON-RPC server (initialize / tools/list / tools/call / ping) exposing
+    loupe_run, loupe_probe, loupe_recommend, loupe_stats. Tool calls
+    re-spawn the CLI per call. Live-verified over stdio. Per-client setup —
+    Cursor, Codex CLI, Claude Code/Desktop, generic — in
+    docs/INTEGRATIONS.md, plus a no-MCP instruction block (2026-07-13).
 
-The report currently crowns the best mean. With n=3–5 that can be noise, and
-"best quality" can hide "second place at 40% of the cost". These make the
-verdict trustworthy — the quality core of v2.
+19. **Shareable evidence** · M — `loupe report results.json --md`: render a
+    `bench --out` bundle as a markdown table for READMEs, PRs, and issues.
+    Community reviewer-matrix knowledge ("who reviews whom well") grows from
+    people pasting these. Gate: first real request for it.
 
-4. ✅ **DONE — Significance marker between arms** `[better]` — Welch-style
-   top-vs-runner-up separation in the verdict from the stats already
-   collected: "clear at this n (t≈7.3)" or "inconclusive at this n, run ~N
-   more repeats". Own math, no stats dependency (2026-07-12).
+## Carried from v2 — gates unchanged
 
-5. ✅ **DONE — Cost-aware verdict** `[better]` — the verdict now quantifies the
-   trade when a cheaper arm sits within ε of the best: "self-review matches
-   advised within 0.01 at 0.1× its tokens — the cost-aware pick"
-   (2026-07-12).
+1. **Live-verify `anthropic-api` / `openai-api` + pricing** · S — one run +
+   one bench task per engine with a real key; compare `$` estimates against
+   provider usage numbers; also live-proves the prompt-caching split
+   (CHANGELOG §31). Blocked on: a key in the env. Multi-turn conversation
+   caching folds in here too.
 
-6. ✅ **DONE — A pack with headroom (`hard`)** `[better]` —
-   `benchmark/packs/hard.json`: semver prerelease precedence, ISO-8601
-   duration with the months trap, interval merge with a no-mutation check,
-   RFC-4180 CSV quoting. Every grader proven both ways in packs.test.ts:
-   reference scores 1.0, a plausible-buggy solution scores <1 (2026-07-12).
+7. **Judge calibration** · M — run `judge` alongside `exec` on the coding
+   packs, report agreement. Gate: someone actually using judge-graded
+   workloads.
 
-11. ✅ **DONE — Reviewer catch-rate probe** `[better]` — `loupe probe`: feeds
-    the reviewer 5 planted-defect + 5 correct fixtures (benchmark/probe.json,
-    including the exact output a 3B reviewer rubber-stamped live) through the
-    real reviewer prompt; reports catch rate, false-alarm rate, and a verdict
-    with a loud rubber-stamp warning. Live-verified both directions:
-    codex/auto → trustworthy (5/5, 0 false alarms); qwen2.5:0.5b →
-    rubber-stamp (0/5) (2026-07-12).
+9. **Release automation** · S — `npm version` + tag → CI publish with a
+   granular npm token. Gate: publish cadence makes the manual passkey step
+   annoying (it isn't yet).
 
-12. ✅ **DONE — Lean protocol + prompt caching** `[useful]` — `--lean`
-    (run + bench): round ≥1 re-reviews send prior critique + a line-diff of
-    the revision instead of the full output, with whole-prompt economy (send
-    whichever prompt is smaller — a live 3B run proved the delta can lose on
-    short outputs) and a 1500-char critique cap; round 0 and verify feedback
-    untouched. Plus `cache_control` on the stable task prefix for
-    anthropic-api via CallOpts metadata. A/B harness = existing
-    `bench --out` × `loupe diff`. Live-verified on local 3B (CHANGELOG §31,
-    2026-07-13). A/B on the coding pack (n=8/arm): advised +0.07 score at
-    −39% tokens, but self-review −0.30 (weak model re-reviewing its own diff)
-    with a ±0.10 noise floor — so lean STAYS opt-in; A/B your own workload
-    before flipping it on for self-review pairings.
+9b. **List the Action on the GitHub Marketplace** · S — branding shipped in
+    action.yml; the listing is a manual step: draft a GitHub release and
+    tick "Publish this Action to the Marketplace".
 
-## Later — gated until something needs them
-
-7. **Judge calibration** `[better]` · M — run the `judge` grader alongside
-   `exec` on the coding packs and report agreement. Answers "can I trust the
-   judge on tasks that can't be exec-graded?". Gate: someone actually using
-   judge-graded workloads.
-
-8. ✅ **DONE — Reviewer-matrix sweep + `recommend`** `[useful]` —
-   `bench --reviewers "engine/model,…"`: advised arm per candidate against a
-   shared baseline control, reported through the existing aggregate/verdict
-   machinery (arms labeled `advised@engine/model`), with a "Matrix pick"
-   line: cheapest reviewer within ε of the best — or none when baseline
-   matches them. Plus `loupe recommend`: probe-gates the candidates
-   (rubber-stamps eliminated so they can't win on price), mini-benches the
-   survivors, writes the pick to loupe.config.json (2026-07-13).
-
-9. **Release automation** `[useful]` · S — `npm version` + tag → CI publish
-   with a granular npm token. Gate: publish cadence makes the manual passkey
-   step annoying (it isn't yet).
-
-9b. **List the Action on the GitHub Marketplace** `[useful]` · S — branding
-    (icon/color) shipped in action.yml; the listing itself is a manual step:
-    draft a GitHub release and tick "Publish this Action to the Marketplace".
-
-10. **Unwired config knobs from the design** `[better]` · M — carried from v1:
-    `frequency: on-low-confidence`, `consult_context: full-history`,
-    `token_budget`/`saver`. Build each only when a workload needs it (YAGNI).
+10. **Unwired config knobs from the design** · M — `frequency:
+    on-low-confidence`, `consult_context: full-history`,
+    `token_budget`/`saver`. Build each only when a workload needs it.
 
 ## Cleaner — tech-debt paydown
 
-- **e2e coverage for `bench --parallel` quiet path** `[cleaner]` · S — the
-  pool is unit-tested and sequential bench is e2e-tested; the N>1 tagged-line
-  path is only smoke-tested. One test through the fake engine with
-  `--parallel 2`.
+- **e2e coverage for `bench --parallel` quiet path** · S — the pool is
+  unit-tested; the N>1 tagged-line path is only smoke-tested.
+- **README warning: exec packs run model-generated code** · S — grader.ts
+  documents the subprocess+timeout ceiling (no fs/network sandbox); the
+  README should say it where users pick up third-party task files: treat
+  packs from strangers like code from strangers.
 
-## Non-goals (for now)
+## Non-goals (still)
 
-- >2-model panels / committees — loupe is pairwise.
+- >2-model panels / committees — loupe is pairwise. If it needs an org chart
+  of models, it's a different product.
 - A GUI — CLI + JSON is the surface.
 - Becoming an agent framework — the builder is a toolless call, on purpose.
+- Prompt-engineering advice — loupe measures; it doesn't editorialize.
 
 ---
 

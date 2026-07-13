@@ -188,3 +188,90 @@ test('formatReport: shows ±stddev and warns on small n', () => {
   assert.match(out, /±0\.35/);
   assert.match(out, /small n/i);
 });
+
+// --- paired significance (#13) + stratified verdict (#14) ---
+
+const trec = (taskId: string, mode: string, score: number): RunRecord => ({
+  taskId,
+  mode,
+  score,
+  inputTokens: 100,
+  outputTokens: 50,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  rounds: 1,
+  costUsd: null,
+});
+
+test('paired significance: consistent per-task gap is clear even when task difficulty varies wildly', () => {
+  // advised beats baseline by exactly +0.20 on every task, but task means span
+  // 0.1..0.9 — unpaired Welch drowns in task variance; pairing must not.
+  const records = [
+    trec('easy', 'baseline', 0.9), trec('easy', 'advised', 1.0),
+    trec('mid1', 'baseline', 0.5), trec('mid1', 'advised', 0.7),
+    trec('mid2', 'baseline', 0.4), trec('mid2', 'advised', 0.6),
+    trec('hard', 'baseline', 0.1), trec('hard', 'advised', 0.3),
+  ];
+  const out = formatReport(aggregate(records), records);
+  assert.match(out, /Significance:.*advised .*vs baseline.*clear/i, out);
+  assert.match(out, /paired across 4 tasks/i, out);
+});
+
+test('paired significance: no shared tasks between top arms → falls back to the Welch read', () => {
+  const records = [
+    trec('a1', 'baseline', 0.5), trec('a2', 'baseline', 0.6),
+    trec('b1', 'advised', 0.8), trec('b2', 'advised', 0.9),
+  ];
+  const out = formatReport(aggregate(records), records);
+  assert.match(out, /Significance:/, out);
+  assert.ok(!out.includes('paired across'), out);
+});
+
+test('stratified verdict: per-task delta vs baseline names where review pays', () => {
+  const records = [
+    trec('parse', 'baseline', 0.4), trec('parse', 'advised', 0.9),
+    trec('luhn', 'baseline', 0.8), trec('luhn', 'advised', 0.8),
+    trec('roman', 'baseline', 0.9), trec('roman', 'advised', 0.8),
+  ];
+  const out = formatReport(aggregate(records), records);
+  assert.match(out, /Where review pays \(advised vs baseline\)/, out);
+  assert.match(out, /parse \+0\.50/, out);
+  assert.match(out, /luhn ±0\.00/, out);
+  assert.match(out, /roman -0\.10/, out);
+  assert.match(out, /pays on 1\/3 tasks/, out);
+});
+
+test('stratified verdict: absent without records or with a single task', () => {
+  const single = [trec('only', 'baseline', 0.4), trec('only', 'advised', 0.9)];
+  assert.ok(!formatReport(aggregate(single), single).includes('Where review pays'));
+  const multi = [
+    trec('a', 'baseline', 0.4), trec('a', 'advised', 0.9),
+    trec('b', 'baseline', 0.5), trec('b', 'advised', 0.9),
+  ];
+  assert.ok(!formatReport(aggregate(multi)).includes('Where review pays'), 'no records param → no strata');
+});
+
+// --- separation (#15 --until-clear's stop signal) ---
+
+import { separation } from './report.js';
+
+test('separation: consistent paired gap → clear; pure noise → not clear', () => {
+  const consistent = [
+    trec('a', 'baseline', 0.5), trec('a', 'advised', 0.7),
+    trec('b', 'baseline', 0.2), trec('b', 'advised', 0.4),
+    trec('c', 'baseline', 0.8), trec('c', 'advised', 1.0),
+  ];
+  assert.equal(separation(aggregate(consistent), consistent)?.clear, true);
+
+  const noisy = [
+    trec('a', 'baseline', 0.2), trec('a', 'advised', 0.9),
+    trec('b', 'baseline', 0.9), trec('b', 'advised', 0.2),
+    trec('c', 'baseline', 0.4), trec('c', 'advised', 0.5),
+  ];
+  assert.equal(separation(aggregate(noisy), noisy)?.clear, false);
+});
+
+test('separation: fewer than 2 graded arms → null', () => {
+  const one = [trec('a', 'baseline', 0.5)];
+  assert.equal(separation(aggregate(one), one), null);
+});

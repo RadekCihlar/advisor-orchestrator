@@ -668,3 +668,40 @@ issues with") ahead of publishing 0.2.0.
 
 **Verified:** full suite + typecheck (count in CI), live matrix + recommend
 runs on local models, lean A/B via two full bench runs + `loupe diff`.
+
+## 33. v3 Now-batch: paired stats, strata, --until-clear, `stats`, MCP server (2026-07-13)
+
+ROADMAP v3 #13–#16 + #18 in one batch — sharper statistics and universal
+integration.
+
+- **Paired significance (#13).** The significance read now pairs per-task
+  differences between the top two arms, so task-difficulty variance cancels
+  instead of drowning the arm signal — a consistent gap is "clear" at the
+  same n where the old Welch read shrugged (the lean A/B's hand-waved "noise
+  floor" argument is exactly what this replaces). Falls back to Welch when
+  fewer than 2 tasks are shared. `formatReport` gained an optional records
+  param; bench passes it.
+- **Stratified verdict (#14).** "Where review pays (advised vs baseline):
+  parse +0.50 · luhn ±0.00 · roman −0.10 → pays on 1/3 tasks" — per-task Δ
+  of the best non-baseline arm vs baseline, sorted by delta, capped at 8.
+  The line that tells a user WHICH of their workloads earns a reviewer.
+- **Adaptive repeats (#15).** `bench --until-clear [--max-repeat N]`
+  (default 10): unit construction became per-wave; waves are appended only
+  while `separation()` (exported, paired-first) says the top two arms are
+  inseparable. Tokens go exactly where the verdict is uncertain.
+- **`loupe stats` (#16).** usage.jsonl → per-pairing runs / mean rounds /
+  approved-early / flagged rates / tokens / $, overall totals, last run.
+  Tolerant parser (append-only log across versions — malformed lines skip,
+  never crash). `--json` is one stable document; first live read: 115 runs,
+  534k tokens, $1.11 since 07-09.
+- **MCP server (#18).** `loupe mcp` — stdio JSON-RPC, zero deps (the
+  protocol subset needed is ~100 lines: initialize / tools/list /
+  tools/call / ping). Four tools: loupe_run / loupe_probe / loupe_recommend
+  / loupe_stats; calls re-spawn the CLI per call (dev entry re-spawns via
+  `node --import tsx` so task strings never touch a shell). Live-verified
+  over stdio incl. a real loupe_stats call. docs/INTEGRATIONS.md: setup for
+  Cursor / Codex CLI / Claude Code / Claude Desktop / generic clients, a
+  copy-paste block for non-MCP agents, and statusline one-liners.
+
+**Verified:** 161/161 tests, clean typecheck, MCP stdio smoke live, stats
+live on real history, --until-clear live on the reasoning pack.

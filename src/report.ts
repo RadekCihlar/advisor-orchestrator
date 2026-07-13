@@ -78,7 +78,10 @@ export function aggregate(records: RunRecord[]): ArmStats[] {
 
 const n0 = (x: number): string => Math.round(x).toLocaleString('en-US');
 
-export function formatReport(stats: ArmStats[]): string {
+// records is optional but worth passing (bench does): it unlocks the paired
+// significance read and the per-task "where review pays" strata — both of
+// which extract more verdict from the same tokens than arm-level means can.
+export function formatReport(stats: ArmStats[], records?: RunRecord[]): string {
   if (stats.length === 0) return 'No runs to report.';
 
   const lines: string[] = [];
@@ -122,8 +125,10 @@ export function formatReport(stats: ArmStats[]): string {
 
   lines.push('Verdict:');
   lines.push(`  Best quality:            ${bestQualityLabel(graded, bestScore)}`);
-  const sig = significanceLine(graded);
-  if (sig) lines.push(`  Significance:            ${sig}`);
+  const sig = separation(stats, records);
+  if (sig) lines.push(`  Significance:            ${sig.detail}`);
+  const strata = whereReviewPays(graded, records);
+  if (strata) lines.push(strata);
   lines.push(`  Cheapest at top quality: ${cheapestAtTop.mode} (${n0(cheapestAtTop.meanTotalTokens)} tokens/task, score ${cheapestAtTop.meanScore.toFixed(2)})`);
   // Cost-aware callout (ROADMAP #5): when a strictly-lower-scoring arm sits
   // within EPS of the best AND is cheaper, quantify the trade explicitly —
@@ -163,23 +168,93 @@ function bestQualityLabel(graded: Array<ArmStats & { meanScore: number }>, bestS
 // that the line says inconclusive and estimates how many more repeats would
 // separate the same gap at the observed variance: solving t=2 with equal
 // per-arm n gives n ≈ 4·(s1²+s2²)/diff².
-function significanceLine(graded: Array<ArmStats & { meanScore: number }>): string | null {
+// Per-task mean scores for one arm — the unit both paired significance and
+// the strata block work in (repeats collapse to a task mean first).
+function perTaskMeans(records: RunRecord[], mode: string): Map<string, number> {
+  const byTask = new Map<string, number[]>();
+  for (const r of records) {
+    if (r.mode !== mode || r.score === null) continue;
+    const list = byTask.get(r.taskId);
+    if (list) list.push(r.score);
+    else byTask.set(r.taskId, [r.score]);
+  }
+  return new Map([...byTask].map(([task, scores]) => [task, mean(scores)]));
+}
+
+// ROADMAP v3 #13: pair the per-task differences between the top two arms.
+// The unpaired Welch read compares arm means across a MIXED bag of tasks, so
+// task-difficulty variance drowns the arm signal; pairing removes it — a
+// consistent gap is "clear" at the same n where Welch shrugs. Falls back to
+// Welch (null here) when fewer than 2 tasks are shared.
+export interface Separation {
+  clear: boolean; // top vs runner-up separation trustworthy at the current n
+  detail: string;
+}
+
+function pairedSeparation(records: RunRecord[], top: ArmStats & { meanScore: number }, second: ArmStats & { meanScore: number }): Separation | null {
+  const a = perTaskMeans(records, top.mode);
+  const b = perTaskMeans(records, second.mode);
+  const shared = [...a.keys()].filter((k) => b.has(k));
+  if (shared.length < 2) return null;
+  const diffs = shared.map((k) => a.get(k)! - b.get(k)!);
+  const md = mean(diffs);
+  const sd = sampleStddev(diffs)!;
+  const paired = `paired across ${shared.length} tasks`;
+  const label = `${top.mode} ${md >= 0 ? '+' : ''}${md.toFixed(2)} vs ${second.mode}`;
+  if (md === 0) return { clear: false, detail: `${label} — identical mean scores, nothing to separate (${paired})` };
+  if (sd === 0) return { clear: true, detail: `${label} — clear at this n: the same gap on every task (${paired})` };
+  const t = Math.abs(md) / (sd / Math.sqrt(shared.length));
+  if (t >= 2) return { clear: true, detail: `${label} — clear at this n (${paired}, t≈${t.toFixed(1)})` };
+  return { clear: false, detail: `${label} — inconclusive at this n (${paired}, t≈${t.toFixed(1)}) — raise --repeat` };
+}
+
+// ROADMAP v3 #14: the expected real-world finding is "review helps on the
+// hard tasks only", and arm-level means average it away. Per-task Δ of the
+// best non-baseline arm vs baseline names WHICH tasks earn the reviewer.
+function whereReviewPays(graded: Array<ArmStats & { meanScore: number }>, records?: RunRecord[]): string | null {
+  if (!records) return null;
+  const baseline = graded.find((s) => s.mode === 'baseline');
+  if (!baseline) return null;
+  const contender = graded.filter((s) => s.mode !== 'baseline').sort((a, b) => b.meanScore - a.meanScore)[0];
+  if (!contender) return null;
+  const base = perTaskMeans(records, 'baseline');
+  const top = perTaskMeans(records, contender.mode);
+  const shared = [...top.keys()].filter((k) => base.has(k));
+  if (shared.length < 2) return null; // one task — the arm table already says it all
+  const deltas = shared
+    .map((k) => ({ task: k, d: top.get(k)! - base.get(k)! }))
+    .sort((x, y) => y.d - x.d);
+  const fmt = (d: number) => (d > 1e-9 ? `+${d.toFixed(2)}` : d < -1e-9 ? d.toFixed(2) : '±0.00');
+  const shown = deltas.slice(0, 8).map(({ task, d }) => `${task} ${fmt(d)}`);
+  if (deltas.length > 8) shown.push('…');
+  const pays = deltas.filter(({ d }) => d > 1e-9).length;
+  return `  Where review pays (${contender.mode} vs baseline): ${shown.join(' · ')} → pays on ${pays}/${shared.length} tasks`;
+}
+
+// Exported for `bench --until-clear` (ROADMAP v3 #15): the stop signal is
+// "is the top-vs-runner-up separation trustworthy yet?".
+export function separation(stats: ArmStats[], records?: RunRecord[]): Separation | null {
+  const graded = stats.filter((s): s is ArmStats & { meanScore: number } => s.meanScore !== null);
   if (graded.length < 2) return null; // one arm — nothing to compare
   const ranked = [...graded].sort((a, b) => b.meanScore - a.meanScore);
   const [top, second] = ranked;
+  if (records) {
+    const paired = pairedSeparation(records, top, second);
+    if (paired) return paired;
+  }
   const diff = top.meanScore - second.meanScore;
   const label = `${top.mode} ${diff >= 0 ? '+' : ''}${diff.toFixed(2)} vs ${second.mode}`;
   if (top.stddevScore === null || second.stddevScore === null) {
-    return `n too small for a significance read (need ≥2 graded runs per arm — raise --repeat)`;
+    return { clear: false, detail: `n too small for a significance read (need ≥2 graded runs per arm — raise --repeat)` };
   }
-  if (diff === 0) return `${label} — identical mean scores, nothing to separate`;
+  if (diff === 0) return { clear: false, detail: `${label} — identical mean scores, nothing to separate` };
   const se = Math.sqrt(top.stddevScore ** 2 / top.gradedRuns + second.stddevScore ** 2 / second.gradedRuns);
-  if (se === 0) return `${label} — clear at this n (zero variance in both arms)`;
+  if (se === 0) return { clear: true, detail: `${label} — clear at this n (zero variance in both arms)` };
   const t = diff / se;
-  if (t >= 2) return `${label} — clear at this n (t≈${t.toFixed(1)})`;
+  if (t >= 2) return { clear: true, detail: `${label} — clear at this n (t≈${t.toFixed(1)})` };
   const nNeeded = Math.ceil((4 * (top.stddevScore ** 2 + second.stddevScore ** 2)) / diff ** 2);
   const more = Math.max(1, nNeeded - Math.max(top.gradedRuns, second.gradedRuns));
-  return `${label} — inconclusive at this n, run ~${more} more repeats (t≈${t.toFixed(1)})`;
+  return { clear: false, detail: `${label} — inconclusive at this n, run ~${more} more repeats (t≈${t.toFixed(1)})` };
 }
 
 // Serializable bundle for `bench --out results.json` — lets runs accumulate and
